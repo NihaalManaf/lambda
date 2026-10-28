@@ -1,26 +1,353 @@
 @import "tailwindcss";
 
+/* lambda theme: editorial serif (STIX Two Text), Manrope body,
+   near-black "nero" on warm off-white, our own classical statues (/art), lowercase voice. */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --paper: #f8f8f6;
+  --paper-2: #f0efeb;
+  --card: #ffffff;
+  --ink: #181818; /* nero */
+  --ink-2: #3a3a3a;
+  --grey: #727272;
+  --line: #e4e2dc;
+  --line-2: #d3d0c8;
+  --blue: #096ad0;
+  --lilac: #e7a3ff;
+  --lilac-soft: #f6e4ff;
+  --ok: #2f8f5b;
+  --warn: #c98a12;
+  --bad: #d4462f;
+  --marker: #e2382b; /* red sharpie for UI sketches */
+  --marker-blue: #1f5fd6;
+  --marker-green: #1f9a55;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-paper: var(--paper);
+  --color-paper-2: var(--paper-2);
+  --color-card: var(--card);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-grey: var(--grey);
+  --color-line: var(--line);
+  --color-line-2: var(--line-2);
+  --color-blue: var(--blue);
+  --color-lilac: var(--lilac);
+  --color-lilac-soft: var(--lilac-soft);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+  --color-marker: var(--marker);
+  --font-serif: var(--font-stix), "Times New Roman", serif;
+  --font-sans: var(--font-manrope), system-ui, sans-serif;
+  --font-mono: var(--font-inconsolata), ui-monospace, monospace;
+  --font-hand: var(--font-kalam), "Comic Sans MS", cursive;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+::selection {
+  background: var(--lilac);
+  color: var(--ink);
+}
+
+/* editorial headline: big serif, tight, lowercase */
+.display {
+  font-family: var(--font-serif);
+  letter-spacing: -0.02em;
+  line-height: 0.95;
+  font-weight: 400;
+}
+
+.outlined {
+  color: transparent;
+  -webkit-text-stroke: 1.5px var(--ink);
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--grey);
+}
+
+/* buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 999px;
+  padding: 0.55rem 1.1rem;
+  font-size: 14px;
+  font-weight: 600;
+  transition:
+    transform 160ms var(--ease-out),
+    background 160ms var(--ease-out),
+    box-shadow 160ms var(--ease-out);
+  will-change: transform;
+}
+.btn:active {
+  transform: scale(0.97);
+}
+.btn:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.btn-primary {
+  background: var(--ink);
+  color: var(--paper);
+}
+.btn-primary:hover {
+  box-shadow: 0 6px 20px -8px rgba(24, 24, 24, 0.55);
+}
+.btn-ghost {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--line-2);
+}
+.btn-ghost:hover {
+  background: var(--card);
+}
+.btn-lilac {
+  background: var(--lilac);
+  color: var(--ink);
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+}
+
+.input {
+  width: 100%;
+  background: var(--card);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  padding: 0.65rem 0.85rem;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 140ms var(--ease-out), box-shadow 140ms var(--ease-out);
+}
+.input:focus {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px rgba(231, 163, 255, 0.45);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--line-2);
+  background: var(--card);
+}
+
+/* shimmer for model-thinking states */
+@keyframes shimmer {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}
+.shimmer {
+  background: linear-gradient(90deg, var(--paper-2) 0%, #fff 50%, var(--paper-2) 100%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+/* react-flow: strip the default chrome so charts read like a sketchbook (attribution stays, whisper-quiet) */
+.react-flow__attribution {
+  background: transparent !important;
+  padding: 0 6px 2px !important;
+  font-size: 9px;
+  opacity: 0.4;
+}
+.react-flow__attribution a {
+  color: var(--grey, #8a8a86);
+}
+.react-flow__handle {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* horizontal strips that scroll without a visible bar (tab rails, chip rows) */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* statue cutouts are hard-cropped at the bottom / right: dissolve those edges into the paper */
+.fade-b {
+  -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent 98%);
+  mask-image: linear-gradient(to bottom, #000 62%, transparent 98%);
+}
+.fade-br {
+  -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent 98%), linear-gradient(to right, #000 62%, transparent 98%);
+  -webkit-mask-composite: source-in;
+  mask-image: linear-gradient(to bottom, #000 60%, transparent 98%), linear-gradient(to right, #000 62%, transparent 98%);
+  mask-composite: intersect;
+}
+
+/* ---------- mac app (electron) — html.desktop is set before first paint by the inline script in layout ---------- */
+
+/* header doubles as the title bar: drag it, traffic lights sit at left: 20px, centred on 56px */
+html.desktop .app-titlebar {
+  -webkit-app-region: drag;
+  -webkit-user-select: none;
+  user-select: none;
+}
+html.desktop .app-titlebar nav {
+  max-width: none;
+  padding-left: 100px; /* clear the traffic lights */
+  padding-right: 24px;
+}
+html.desktop .app-titlebar a,
+html.desktop .app-titlebar button,
+html.desktop .app-titlebar input {
+  -webkit-app-region: no-drag;
+}
+/* unfocused window: chrome (logo + nav) dims a touch, like native title bars. html.blurred is driven by
+   the native window's focus/blur (preload), so opening a menu doesn't flicker it */
+html.desktop .app-titlebar nav {
+  transition: opacity 0.2s var(--ease-out);
+}
+html.desktop.blurred .app-titlebar nav {
+  opacity: 0.55;
+}
+
+/* native feel: chrome isn't text, pointer only on real links */
+html.desktop {
+  overscroll-behavior: none;
+  cursor: default;
+}
+html.desktop body {
+  overscroll-behavior: none;
+}
+html.desktop button,
+html.desktop [role="tab"],
+html.desktop [role="button"],
+html.desktop nav,
+html.desktop label,
+html.desktop .eyebrow,
+html.desktop .btn {
+  -webkit-user-select: none;
+  user-select: none;
+}
+html.desktop button,
+html.desktop [role="tab"],
+html.desktop [role="button"],
+html.desktop .btn {
+  cursor: default;
+}
+html.desktop img {
+  -webkit-user-drag: none;
+}
+/* display type is brand, not content: a click-drag across the hero shouldn't paint it lilac */
+html.desktop h1,
+html.desktop h2,
+html.desktop .display {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* launch: the page arrives from the λ splash already settled, with one soft fade (see layout snippet) */
+html.boot body {
+  animation: boot-in 0.32s var(--ease-out) both;
+}
+html.boot .enter {
+  opacity: 1 !important;
+  transform: none !important;
+}
+html.boot .enter-fade {
+  opacity: 1 !important;
+}
+@keyframes boot-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* hero statues dissolve into the paper instead of hitting the section edge */
+.statue-fade {
+  -webkit-mask-image: linear-gradient(to bottom, #000 38%, transparent 72%);
+  mask-image: linear-gradient(to bottom, #000 38%, transparent 72%);
+}
+
+/* ERD motion (schema tab): nodes that persist across migrations glide to their new spot, new ones fade in,
+   edges blink out while nodes move so paths never lag behind their tables. */
+[data-erd] .react-flow__node {
+  transition: transform 280ms var(--ease-out);
+  animation: erd-in 180ms var(--ease-out) both;
+}
+[data-erd] .react-flow__edges {
+  transition: opacity 180ms var(--ease-out);
+}
+[data-erd][data-settling] .react-flow__edges {
+  opacity: 0;
+  transition-duration: 60ms;
+}
+[data-erd] .react-flow__node-table {
+  cursor: pointer;
+}
+@keyframes erd-in {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-erd] .react-flow__node {
+    transition: none;
+    animation: none;
+  }
+}
+
+/* lambda:focus target (chat change card → tab): a lilac ring that breathes out once */
+.focus-pulse {
+  animation: focus-pulse 1.6s var(--ease-out) both;
+}
+@keyframes focus-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-lilac, #e7a3ff) 0%, transparent);
+  }
+  18% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-lilac, #e7a3ff) 85%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--color-lilac, #e7a3ff) 0%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .focus-pulse {
+    animation: none;
+    box-shadow: 0 0 0 3px var(--color-lilac, #e7a3ff);
+  }
 }

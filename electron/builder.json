@@ -1,0 +1,50 @@
+{
+  "appId": "com.nihaal.lambda",
+  "productName": "lambda",
+  "copyright": "nihaal",
+  "directories": {
+    "app": "electron/app",
+    "output": "dist",
+    "buildResources": "electron/build"
+  },
+  "electronVersion": "38.8.6",
+  "electronDist": "node_modules/electron/dist",
+  "npmRebuild": false,
+  "asar": true,
+  "files": [
+    "main.cjs",
+    "preload.cjs",
+    "package.json",
+    "!node_modules{,/**/*}"
+  ],
+  "afterPack": "electron/scripts/after-pack.cjs",
+  "mac": {
+    "target": [
+      {
+        "target": "dir",
+        "arch": [
+          "arm64"
+        ]
+      },
+      {
+        "target": "dmg",
+        "arch": [
+          "arm64"
+        ]
+      }
+    ],
+    "icon": "electron/build/icon.icns",
+    "category": "public.app-category.developer-tools",
+    "identity": null,
+    "hardenedRuntime": false,
+    "darkModeSupport": false,
+    "extendInfo": {
+      "NSRequiresAquaSystemAppearance": true,
+      "LSApplicationCategoryType": "public.app-category.developer-tools"
+    }
+  },
+  "dmg": {
+    "title": "lambda",
+    "writeUpdateInfo": false
+  }
+}

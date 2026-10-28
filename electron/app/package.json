@@ -1,0 +1,9 @@
+{
+  "name": "lambda",
+  "productName": "lambda",
+  "version": "0.1.0",
+  "description": "design, review and verify — before the agents build",
+  "author": "nihaal",
+  "main": "main.cjs",
+  "private": true
+}

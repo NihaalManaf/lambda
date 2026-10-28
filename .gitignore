@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local data + secrets
+/data
+
+
+# mac app
+/dist
+/electron/build/icon-1024.png
