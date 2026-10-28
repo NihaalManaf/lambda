@@ -2,10 +2,6 @@
 
 <p align="center"><em>engineer attention. let agents build it.</em></p>
 
-<p align="center">
-  <img src="docs/readme/landing.png" alt="lambda landing page" />
-</p>
-
 ## manifesto
 
 **01 — the enemy.** slop is the enemy of *understanding.*
@@ -14,7 +10,7 @@
 
 **03 — show, don't tell.** a diagram beats a hundred paragraphs.
 
-**04 — structure.** one-shot it. we make it *correct.*
+**04 — structure.** one-shot it. do it once, do it *right.*
 
 **05 — values.** simplicity · ease · understanding. *no compromise.*
 
@@ -26,30 +22,16 @@ Coding agents can write the code. The scarce thing is a developer's attention: d
 
 lambda sits between you and your agents. Describe a feature in two lines and it lays the work out visually — stories, flows, sketches, schema and queue changes — so you review pictures, not paragraphs. Then it checks the result in a real browser.
 
-<table>
-  <tr>
-    <td width="50%"><img src="docs/readme/stories.png" alt="story board" /></td>
-    <td width="50%"><img src="docs/readme/flows.png" alt="flowcharts" /></td>
-  </tr>
-  <tr>
-    <td><b>stories</b> — "as a / i want / so that" tiles, split into slices you build in order. Every story has browser-checkable acceptance criteria.</td>
-    <td><b>flows</b> — tiny flowcharts (≤ 9 nodes) per lens: journey, data, infra, state. Edge cases pinned to nodes, each one a decision.</td>
-  </tr>
-  <tr>
-    <td colspan="2"><img src="docs/readme/chat.png" alt="talk to lambda" /></td>
-  </tr>
-  <tr>
-    <td colspan="2"><b>talk to lambda</b> (⌘K) — "add a story for…", "that step is wrong, fix it". Every change lands live as a small card you can click or undo.</td>
-  </tr>
-</table>
-
 | | |
 |---|---|
+| **stories** | "as a / i want / so that" tiles, split into slices you build in order. Every story has browser-checkable acceptance criteria. |
+| **flows** | tiny flowcharts (≤ 9 nodes) per lens: journey, data, infra, state. Edge cases pinned to nodes, each one a decision. |
 | **ui sketch** | marker-pen notes over a screenshot of *your* running app: insert here, remove this, move that. |
 | **schema** | replays your SQL migrations into diagrams. Added / removed / changed tables at a glance, risk chips, no SQL unless you ask. |
 | **queues** | maps producers → queues / crons → consumers from your code, and shows what a feature changes. |
 | **verify** | Claude Code drives a browser with your team's test login and checks each acceptance criterion. |
 | **context** | pulls related Linear issues, Slack threads and past Claude Code sessions into the feature automatically. |
+| **talk to lambda** | ⌘K — "add a story for…", "that step is wrong, fix it". Every change lands live as a small card you can click or undo. |
 
 New features generate everything on their own — no clicking "generate" on every tab. Schema and queue tabs only appear when a feature needs them.
 

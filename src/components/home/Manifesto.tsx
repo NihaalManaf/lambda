@@ -8,7 +8,7 @@ const TENETS = [
   { tag: "the enemy", line: <>slop is the enemy of <em>understanding.</em></> },
   { tag: "attention engineering", line: <>put developer attention where it <em>pays.</em></> },
   { tag: "show, don't tell", line: <>a diagram beats a <span className="outlined">hundred</span> paragraphs.</> },
-  { tag: "structure", line: <>one-shot it. we make it <em>correct.</em></> },
+  { tag: "structure", line: <>one-shot it. do it once, do it <em>right.</em></> },
   { tag: "values", line: <>simplicity · ease · understanding. <em>no compromise.</em></> },
 ];
 
