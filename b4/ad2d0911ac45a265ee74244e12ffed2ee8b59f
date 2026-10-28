@@ -1,0 +1,22 @@
+README.md
+  s_db4e1d5a0ec6c9::t_20e417dec81d98 13
+  s_db4e1d5a0ec6c9::t_2cc30fa9edfb01 27-28,34
+src/components/home/Manifesto.tsx
+  s_db4e1d5a0ec6c9::t_20e417dec81d98 11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b4ad2d0911ac45a265ee74244e12ffed2ee8b59f",
+  "prompts": {},
+  "sessions": {
+    "s_db4e1d5a0ec6c9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e6947206-7a6d-410b-896f-b0e7a63057e9",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Nihaal Manaf <nihaalmanaf@gmail.com>"
+    }
+  }
+}
