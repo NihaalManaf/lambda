@@ -1,9 +1,3 @@
-<p align="center">
-  <img src="docs/readme/muse-astro.png" width="170" alt="" />
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <img src="docs/readme/sage-compass.png" width="190" alt="" />
-</p>
-
 <h1 align="center">λ lambda</h1>
 
 <p align="center"><em>engineer attention. let agents build it.</em></p>
