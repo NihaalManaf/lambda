@@ -2,6 +2,10 @@
 
 <p align="center"><em>engineer attention. let agents build it.</em></p>
 
+<p align="center">
+  <img src="docs/readme/landing.png" alt="lambda landing page" />
+</p>
+
 ## manifesto
 
 **01 — the enemy.** slop is the enemy of *understanding.*
