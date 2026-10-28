@@ -1,0 +1,19 @@
+README.md
+  s_db4e1d5a0ec6c9::t_f56b16c7565004 5-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d9d529d2441ec7e09249dc3e652155b71ede47e4",
+  "prompts": {},
+  "sessions": {
+    "s_db4e1d5a0ec6c9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e6947206-7a6d-410b-896f-b0e7a63057e9",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Nihaal Manaf <nihaalmanaf@gmail.com>"
+    }
+  }
+}
