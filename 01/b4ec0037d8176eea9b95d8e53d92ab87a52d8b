@@ -1,0 +1,44 @@
+.gitignore
+  h_0b1ed37cf776e3 1-41
+AGENTS.md
+  h_0b1ed37cf776e3 1-9
+README.md
+  h_0b1ed37cf776e3 1-36
+eslint.config.mjs
+  h_0b1ed37cf776e3 1-18
+next.config.ts
+  h_0b1ed37cf776e3 1-17
+package-lock.json
+  h_0b1ed37cf776e3 1-6866
+package.json
+  h_0b1ed37cf776e3 1-26
+public/file.svg
+  h_0b1ed37cf776e3 1
+public/globe.svg
+  h_0b1ed37cf776e3 1
+public/next.svg
+  h_0b1ed37cf776e3 1
+public/vercel.svg
+  h_0b1ed37cf776e3 1
+public/window.svg
+  h_0b1ed37cf776e3 1
+src/app/globals.css
+  h_0b1ed37cf776e3 1-26
+src/app/layout.tsx
+  h_0b1ed37cf776e3 1-29
+src/app/page.tsx
+  h_0b1ed37cf776e3 1-69
+tsconfig.json
+  h_0b1ed37cf776e3 1-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "01b4ec0037d8176eea9b95d8e53d92ab87a52d8b",
+  "prompts": {},
+  "humans": {
+    "h_0b1ed37cf776e3": {
+      "author": "Nihaal Manaf <nihaalmanaf@gmail.com>"
+    }
+  }
+}
