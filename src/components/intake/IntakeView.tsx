@@ -133,6 +133,10 @@ export default function IntakeView({
         <div className="flex items-center gap-3">
           <p className="eyebrow">{copy.eyebrow}</p>
           <StackPill featureId={feature.id} compact />
+          {/* leaves the feature as it is; the conversation picks up where it was when reopened */}
+          <Link href="/" aria-label="close feature" title="close" className="btn btn-ghost ml-auto !h-8 !w-8 shrink-0 !justify-center !p-0 text-grey hover:text-ink">
+            ×
+          </Link>
         </div>
         <h1 className="display mt-3 text-[40px] text-ink md:text-[52px]">{feature.title}</h1>
         <p className="mt-3 font-mono text-[11.5px] text-grey">
