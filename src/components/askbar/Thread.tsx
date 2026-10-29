@@ -342,26 +342,31 @@ function Reply({
       {thinking && <Thinking />}
       {streaming && status && <p className="trace-shimmer truncate font-mono text-[11.5px]">{status}</p>}
       {changes.length > 0 && (
-        <ul className={clsx("flex flex-wrap gap-1.5", undone && "opacity-45 [&_button]:line-through")} aria-label="changes">
-          {changes.map((n, i) => (
-            <ChangeChip key={i} note={n} onClick={() => onChip(n)} animate={!!streaming} />
-          ))}
-          {onUndo && !undone && (
-            <li>
+        <div className={clsx(undone && "opacity-45")}>
+          <div className="mb-1.5 flex items-center justify-between px-1">
+            <span className="eyebrow">
+              {changes.length} {changes.length === 1 ? "change" : "changes"}
+            </span>
+            {onUndo && !undone && (
               <button
                 type="button"
                 onClick={onUndo}
                 title="roll back every change in this turn"
-                className="inline-flex items-center gap-1 rounded-full border border-line-2 py-1 pl-2 pr-2.5 font-mono text-[11px] text-grey transition-[transform,color,border-color] duration-150 hover:border-ink-2 hover:text-ink active:scale-[0.97]"
+                className="inline-flex items-center gap-1 font-mono text-[11px] text-grey transition-colors duration-150 hover:text-ink"
               >
                 <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden>
                   <path d="M4 2.5L1.5 5 4 7.5M1.8 5h5.7a3 3 0 010 6H5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
                 undo turn
               </button>
-            </li>
-          )}
-        </ul>
+            )}
+          </div>
+          <ul className={clsx("divide-y divide-line overflow-hidden rounded-[14px] border border-line bg-card", undone && "[&_.label]:line-through")} aria-label="changes">
+            {changes.map((n, i) => (
+              <ChangeChip key={i} note={n} onClick={() => onChip(n)} animate={!!streaming} />
+            ))}
+          </ul>
+        </div>
       )}
       {undone && <span className="font-mono text-[11px] text-grey">undone</span>}
       {undoError && <span className="font-mono text-[11px] text-bad">{undoError}</span>}
@@ -393,32 +398,36 @@ function Reply({
   );
 }
 
+// the only colour in a change row: what happened to it
 const SIGN = {
-  "+": { glyph: "+", cls: "bg-ok/8 text-ok border-ok/20" },
-  "~": { glyph: "~", cls: "bg-lilac-soft text-ink border-lilac/50" },
-  "−": { glyph: "−", cls: "bg-bad/8 text-bad border-bad/20" },
+  "+": { glyph: "+", cls: "bg-ok/10 text-ok", say: "added" },
+  "~": { glyph: "~", cls: "bg-lilac-soft text-ink", say: "changed" },
+  "−": { glyph: "−", cls: "bg-bad/10 text-bad", say: "removed" },
 } as const;
 
+// One row of a turn's change list: sign · kind · what it is. Clicking shows it in the workspace.
 export function ChangeChip({ note, onClick, animate }: { note: ChangeNote; onClick: () => void; animate: boolean }) {
   const s = SIGN[note.sign] ?? SIGN["~"];
   return (
     <motion.li
-      initial={animate ? { opacity: 0, scale: 0.96, y: 4 } : false}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
+      initial={animate ? { opacity: 0, y: 4 } : false}
+      animate={{ opacity: 1, y: 0 }}
       transition={{ type: "spring", stiffness: 520, damping: 34 }}
     >
       <button
         type="button"
         onClick={onClick}
-        title={note.what === "piece" ? "show this piece" : `show in ${note.tab}`}
-        className={clsx(
-          "inline-flex max-w-[320px] items-center gap-1.5 rounded-full border py-1 pl-2 pr-2.5 text-[12px] transition-[transform,filter] duration-150 hover:brightness-[0.97] active:scale-[0.97]",
-          s.cls,
-        )}
+        title={`${s.say} ${note.what}: ${note.label} — ${note.what === "piece" ? "show this piece" : `show in ${note.tab}`}`}
+        className="group flex w-full items-center gap-3 px-3 py-2 text-left transition-colors duration-150 hover:bg-paper-2/60 active:bg-paper-2"
       >
-        <span className="font-mono text-[13px] font-semibold leading-none">{s.glyph}</span>
-        <span className="font-mono text-[10.5px] uppercase tracking-[0.08em] opacity-70">{note.what}</span>
-        <span className="truncate font-semibold">{note.label}</span>
+        <span aria-label={s.say} className={clsx("grid h-5 w-5 shrink-0 place-items-center rounded-full font-mono text-[12px] leading-none", s.cls)}>
+          {s.glyph}
+        </span>
+        <span className="w-[78px] shrink-0 whitespace-nowrap font-mono text-[10.5px] uppercase tracking-[0.08em] text-grey">{note.what}</span>
+        <span className="label min-w-0 flex-1 truncate text-[13px] text-ink">{note.label}</span>
+        <span aria-hidden className="shrink-0 text-[12px] text-grey opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+          →
+        </span>
       </button>
     </motion.li>
   );
