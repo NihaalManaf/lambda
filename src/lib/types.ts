@@ -15,13 +15,20 @@ export interface ContextRef {
 
 // ---------- background generation ----------
 
-export type JobKind = "context" | "stories" | "flows" | "schema" | "queues";
+// feature-level jobs live on feature.jobs; piece-level jobs live on piece.jobs
+export type FeatureJobKind = "intake" | "context" | "pieces";
+export type PieceJobKind = "stories" | "flows" | "schema" | "queues" | "needs" | "sketch";
+export type JobKind = FeatureJobKind | PieceJobKind;
+export const FEATURE_JOB_KINDS: FeatureJobKind[] = ["intake", "context", "pieces"];
+export const PIECE_JOB_KINDS: PieceJobKind[] = ["stories", "flows", "schema", "queues", "needs", "sketch"];
+export const isFeatureJobKind = (k: string): k is FeatureJobKind => (FEATURE_JOB_KINDS as string[]).includes(k);
 export type JobStatus = "queued" | "running" | "done" | "error";
 
 export interface Job {
   kind: JobKind;
   status: JobStatus;
   error?: string; // short
+  note?: string; // short, a done job's caveat (e.g. sketch: "skipped /admin — login failed")
   startedAt?: string;
   finishedAt?: string;
   pid?: number; // owning server process, for the stale sweep
@@ -48,6 +55,8 @@ export interface ChatMessage {
   notes?: import("./ops").ChangeNote[];
   error?: string; // assistant turn that failed or was stopped
   undone?: boolean; // its changes were rolled back with "undo turn"
+  source?: "intake" | "edit" | "code"; // intake conversation, edit chat, or an answer from the codebase session
+  ask?: { question: string; options: string[]; multi?: boolean }; // rendered as option chips
   at: string;
 }
 
@@ -55,10 +64,11 @@ export interface ChatMessage {
 // `after` fingerprints the same fields right after the turn: undo is refused once anything else changed them.
 export interface ChatUndo {
   turnId: string;
-  before: Pick<Feature, "title" | "brief" | "stories" | "sizing" | "context" | "contextDismissed" | "flowcharts">;
+  before: Pick<Feature, "title" | "brief" | "context" | "contextDismissed" | "pieces">;
   after: string;
 }
 
+// legacy (pre-pieces) sizing: only read by migrateFeature (src/lib/pieces.ts)
 export interface Slice {
   id: string;
   title: string; // <= 6 words
@@ -120,7 +130,7 @@ export const MAX_FLOW_NODES = 9;
 export const AUTO_LENSES: FlowLens[] = ["customer-journey", "data"];
 // drawn too once the needs check flags backend / async work (queues or schema)
 export const INFRA_LENS: FlowLens = "infra";
-export const autoLenses = (f: Pick<Feature, "needs">): FlowLens[] =>
+export const autoLenses = (f: Pick<PieceArtifacts, "needs">): FlowLens[] =>
   f.needs?.queues || f.needs?.schema ? [...AUTO_LENSES, INFRA_LENS] : AUTO_LENSES;
 
 // ---------- UI mockups ----------
@@ -162,6 +172,8 @@ export interface Mockup {
   annotations: Annotation[];
   intent?: string; // last sketch intent
   thumb?: string; // thumbnail filename under data/shots
+  auto?: boolean; // drawn by the background sketch job (a re-run replaces it unless edited); manual captures never are
+  edited?: boolean; // a person changed an auto sketch's marks / re-sketched it: re-runs keep it
   createdAt: string;
 }
 
@@ -186,7 +198,7 @@ export interface Story {
   want: string;
   soThat: string;
   priority: Priority;
-  sliceId?: string;
+  sliceId?: string; // legacy, unused (pieces replaced slices)
   acceptance: Acceptance[];
   status: StoryStatus;
 }
@@ -230,31 +242,76 @@ export interface Risk {
   target: { kind: "table" | "column" | "node" | "edge" | "migration"; id: string; col?: string };
 }
 
-// ---------- feature ----------
+// ---------- feature → pieces ----------
+
+export type FeaturePhase = "intake" | "shaping" | "ready"; // intake = conversation in progress
+
+// Everything built for one shippable PR.
+export interface PieceArtifacts {
+  stories: Story[];
+  flowcharts: FlowchartSet[];
+  mockups: Mockup[];
+  runs: VerificationRun[];
+  schema?: import("./schema/types").SchemaProposal[];
+  queues?: import("./queues/types").QueueProposal[];
+  needs?: FeatureNeeds;
+}
+
+// A piece = one shippable PR. Ship-as-one = exactly one piece.
+export interface Piece extends PieceArtifacts {
+  id: string; // "pc_xxx"
+  order: number; // 1-based build order
+  title: string; // <= 6 words
+  why: string; // <= 15 words
+  scope?: string[]; // from the brief: what this PR covers
+  status: FeatureStatus;
+  jobs?: Job[]; // piece-level jobs (PieceJobKind)
+}
+
+// Written by the intake session once the feature is clear.
+export interface Brief {
+  summary: string; // <= 40 words
+  roles: string[];
+  inScope: string[]; // each <= 10 words
+  outOfScope: string[];
+  decisions: { q: string; a: string }[];
+  openQuestions: string[];
+  surfaces: string[]; // screens/routes/tables/services touched (grounded in the code)
+  pieces: { title: string; why: string; scope: string[] }[]; // 1..5, ordered
+}
+
+export interface IntakeState {
+  sessionId?: string;
+  worktree?: string;
+  mainSha?: string;
+  status: "idle" | "thinking" | "asking" | "ready" | "error";
+  error?: string;
+}
 
 export interface Feature {
   id: string;
   title: string;
-  brief: string;
+  brief: string; // text (= briefDoc.summary once the intake settles)
+  briefDoc?: Brief; // the structured brief from the intake conversation
+  phase: FeaturePhase;
   status: FeatureStatus;
   createdAt: string;
   updatedAt: string;
   context: ContextRef[];
-  sizing?: Sizing;
-  flowcharts: FlowchartSet[];
-  mockups: Mockup[];
-  stories: Story[];
-  runs: VerificationRun[];
-  schema?: import("./schema/types").SchemaProposal[];
-  queues?: import("./queues/types").QueueProposal[];
-  jobs?: Job[];
-  needs?: FeatureNeeds;
+  pieces: Piece[]; // ordered by .order
+  intake?: IntakeState;
+  jobs?: Job[]; // feature-level jobs (FeatureJobKind)
   discovery?: DiscoveryStatus;
   // auto context the developer detached: never re-attached by rediscover
   contextDismissed?: { kind: ContextRef["kind"]; title: string; url?: string }[];
-  chat?: ChatMessage[];
+  chat?: ChatMessage[]; // the ONE thread (intake + edits)
   chatUndo?: ChatUndo;
 }
+
+// Projection of one piece onto a Feature-shaped object (src/lib/pieces.ts pieceView): tabs, generators
+// and ops keep reading feature.stories / .flowcharts / …; jobs = feature-level + this piece's.
+// Every /api/features/[id]/* route returns one of these (a superset of Feature).
+export type FeatureView = Feature & PieceArtifacts & { pieceId: string; sizing?: undefined };
 
 // ---------- settings ----------
 

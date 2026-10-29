@@ -5,27 +5,27 @@ import Image from "next/image";
 import { AnimatePresence, LayoutGroup, MotionConfig, motion } from "motion/react";
 import clsx from "clsx";
 import type { StoryOp } from "@/lib/ops";
-import type { Feature, Priority, Story } from "@/lib/types";
+import type { FeatureView, Priority, Story } from "@/lib/types";
 import { focusTab, storiesApi, type FocusDetail } from "./api";
 import { notify } from "@/lib/desktop";
-import { Inline, Meter, PRIORITIES, lastRun, liveOf, type Live } from "./bits";
+import { sortPieces } from "@/lib/pieces";
+import { hoverPiece, pieceAction, pieceAt } from "@/components/pieces/api";
+import { Meter, PRIORITIES, lastRun, liveOf, type Live } from "./bits";
 import { QuickAdd } from "./Compose";
-import SizingStrip from "./SizingStrip";
 import StoryDetail from "./StoryDetail";
 import StoryTile, { tileSpring } from "./StoryTile";
+import Scribe from "@/components/Scribe";
 import { UNDO_MS, useStoryOps } from "./useStoryOps";
 
 type Col = {
   id: string;
   title: string;
   n?: number;
-  slice?: boolean;
   match: (s: Story) => boolean;
-  drop: { sliceId?: string; priority?: Priority };
-  seed: { sliceId?: string; priority?: Priority };
+  drop: { priority?: Priority };
+  seed: { priority?: Priority };
 };
 type Pt = { x: number; y: number };
-const NONE = "__none";
 
 // Column under a page-coord point (the dragged tile sits on top, so scan the whole stack).
 function colAt(p: Pt): string | null {
@@ -37,11 +37,10 @@ function colAt(p: Pt): string | null {
   return null;
 }
 
-export default function StoriesTab({ feature, onChange }: { feature: Feature; onChange: (f: Feature) => void }) {
-  const [busy, setBusy] = useState<"generate" | "resize" | null>(null);
+export default function StoriesTab({ feature, onChange }: { feature: FeatureView; onChange: (f: FeatureView) => void }) {
+  const [busy, setBusy] = useState<"generate" | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
-  const [focus, setFocus] = useState<string | null>(null);
   const [hover, setHover] = useState<string | null>(null);
   const [compose, setCompose] = useState<string | null>(null); // column id with the quick-add open
   const [pulse, setPulse] = useState<string | null>(null);
@@ -53,17 +52,14 @@ export default function StoriesTab({ feature, onChange }: { feature: Feature; on
   const op = useCallback((o: StoryOp) => void send([o]), [send]);
 
   const stories = useMemo(() => feature.stories.filter((s) => !hidden.has(s.id)), [feature.stories, hidden]);
-  const slices = feature.sizing?.slices ?? [];
-  // the background "stories" job (auto-generation on create) drives the same skeleton as a manual generate
+  // the background "stories" job (auto-generation on create) drives the same loader as a manual generate
   const storiesJob = feature.jobs?.find((j) => j.kind === "stories");
   const jobBusy = storiesJob?.status === "queued" || storiesJob?.status === "running";
-  const bySlice = slices.length > 1;
   const live = useMemo(() => {
     const m = new Map<string, Live>();
     for (const s of feature.stories) m.set(s.id, liveOf(s, lastRun(feature, s.id)));
     return m;
   }, [feature]);
-  const passing = useMemo(() => new Set([...live].filter(([, v]) => v === "passing").map(([k]) => k)), [live]);
   // most common role seeds the quick-add
   const role = useMemo(() => {
     const c = new Map<string, number>();
@@ -71,14 +67,13 @@ export default function StoriesTab({ feature, onChange }: { feature: Feature; on
     return [...c].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "user";
   }, [feature.stories]);
 
-  const run = async (kind: "generate" | "resize") => {
+  const run = async (kind: "generate") => {
     setBusy(kind);
     setErr(null);
     try {
-      const f = await (kind === "generate" ? storiesApi.generate(fid) : storiesApi.resize(fid));
+      const f = await storiesApi.generate(fid, feature.pieceId);
       onChange(f);
-      setFocus(null);
-      if (kind === "generate") notify("stories ready", `${f.stories.length} tiles for ${f.title}`);
+      notify("stories ready", `${f.stories.length} tiles for ${f.title}`);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -112,7 +107,6 @@ export default function StoriesTab({ feature, onChange }: { feature: Feature; on
       const d = (e as CustomEvent<FocusDetail>).detail;
       if (d?.tab !== "stories" || !d.ref) return;
       const ref = d.ref;
-      setFocus(null);
       let tries = 0;
       const find = () => {
         const sel = `[data-story="${CSS.escape(ref)}"],[data-story-key="${CSS.escape(ref)}"],[data-col="${CSS.escape(ref)}"]`;
@@ -132,34 +126,44 @@ export default function StoriesTab({ feature, onChange }: { feature: Feature; on
     };
   }, []);
 
-  // Columns: slices when split (+ unsliced bucket), else priority lanes.
-  const sliceIds = new Set(slices.map((s) => s.id));
-  const unsliced = (s: Story) => !s.sliceId || !sliceIds.has(s.sliceId);
-  const cols: Col[] = bySlice
-    ? [
-        ...slices.map((sl, i) => ({
-          id: sl.id,
-          title: sl.title,
-          n: i + 1,
-          slice: true,
-          match: (s: Story) => s.sliceId === sl.id,
-          drop: { sliceId: sl.id },
-          seed: { sliceId: sl.id, priority: "should" as Priority },
-        })),
-        ...(stories.some(unsliced) ? [{ id: NONE, title: "unsliced", match: unsliced, drop: {}, seed: {} }] : []),
-      ].filter((c) => !focus || c.id === focus)
-    : PRIORITIES.map((p) => ({
-        id: p,
-        title: p,
-        match: (s: Story) => s.priority === p,
-        drop: { priority: p },
-        seed: { priority: p, sliceId: slices[0]?.id },
-      }));
+  // Columns: priority lanes (a piece's stories have priorities only; pieces replaced slices).
+  const cols: Col[] = PRIORITIES.map((p) => ({
+    id: p,
+    title: p,
+    match: (s: Story) => s.priority === p,
+    drop: { priority: p },
+    seed: { priority: p },
+  }));
+
+  // a tile dragged onto a piece card in the rail moves there (with its runs)
+  const overPiece = useRef<string | null>(null);
+  const dragMove = (p: Pt) => {
+    setHover(colAt(p));
+    const pc = pieceAt(p.x - window.scrollX, p.y - window.scrollY);
+    const next = pc && pc !== feature.pieceId ? pc : null;
+    if (next !== overPiece.current) hoverPiece((overPiece.current = next));
+  };
+  const moveStory = async (story: Story, toPieceId: string) => {
+    setOpen(null);
+    setErr(null);
+    const storyId = realOf(story.id);
+    onChange({ ...feature, stories: feature.stories.filter((s) => s.id !== story.id) }); // optimistic
+    try {
+      onChange((await pieceAction(fid, { action: "move_story", storyId, toPieceId }, feature.pieceId)).feature);
+    } catch (e) {
+      setErr((e as Error).message);
+      storiesApi.get(fid, feature.pieceId).then(onChange, () => {});
+    }
+  };
+  const otherPieces = sortPieces(feature.pieces).filter((p) => p.id !== feature.pieceId);
 
   const drop = (story: Story, p: Pt) => {
     setHover(null);
+    const pc = overPiece.current;
+    if (pc) hoverPiece((overPiece.current = null));
+    if (pc) return void moveStory(story, pc);
     const c = cols.find((x) => x.id === colAt(p));
-    if (!c || c.match(story) || c.id === NONE) return;
+    if (!c || c.match(story)) return;
     op({ op: "update_story", storyId: story.id, ...c.drop });
   };
 
@@ -186,30 +190,16 @@ export default function StoriesTab({ feature, onChange }: { feature: Feature; on
         </AnimatePresence>
 
         {busy === "generate" || (jobBusy && !stories.length) ? (
-          <Skeleton />
+          <Writing startedAt={jobBusy ? storiesJob?.startedAt : undefined} />
         ) : !showBoard ? (
           <EmptyState onGenerate={() => run("generate")} onWrite={() => setCompose("must")} />
         ) : (
           <LayoutGroup>
-            {feature.sizing ? (
-              <SizingStrip
-                sizing={feature.sizing}
-                passing={passing}
-                focus={focus}
-                onFocus={setFocus}
-                onRegenerate={() => run("generate")}
-                touched={feature.stories.some((s) => s.status !== "todo") || feature.runs.length > 0}
-                onResize={() => run("resize")}
-                onAddSlice={(title) => op({ op: "add_slice", title, why: "" })}
-                busy={busy}
-              />
-            ) : (
-              <div className="flex justify-end gap-2">
-                <button className="btn btn-ghost" onClick={() => run("resize")} disabled={!!busy || !stories.length}>
-                  size it
-                </button>
-              </div>
-            )}
+            <div className="flex justify-end gap-2">
+              <button className="btn btn-ghost" onClick={() => run("generate")} disabled={!!busy || jobBusy}>
+                regenerate
+              </button>
+            </div>
 
             {/* board scrolls sideways inside itself (snap per column) — never widens the page.
                 xl: columns narrow to 210px so five slices fit; past that a fade + "→ n more" says there's more */}
@@ -238,17 +228,8 @@ export default function StoriesTab({ feature, onChange }: { feature: Feature; on
                     >
                       <div className="flex min-w-0 items-center gap-2 px-1 pb-3 pt-1">
                         {c.n && <span className="display text-2xl">{c.n}</span>}
-                        {c.slice ? (
-                          <Inline
-                            value={c.title}
-                            onCommit={(title) => op({ op: "rename_slice", sliceId: c.id, title })}
-                            label="slice title"
-                            className="min-w-0 truncate text-sm font-semibold"
-                          />
-                        ) : (
-                          <span className={clsx("truncate text-sm font-semibold", c.id === NONE && "text-grey")}>{c.title}</span>
-                        )}
-                        {!bySlice && <Meter p={c.id as Priority} />}
+                        <span className="truncate text-sm font-semibold">{c.title}</span>
+                        <Meter p={c.id as Priority} />
                         <span className="ml-auto font-mono text-[11px] text-grey">{items.length}</span>
                       </div>
                       <div className="flex flex-1 flex-col gap-3">
@@ -262,7 +243,7 @@ export default function StoriesTab({ feature, onChange }: { feature: Feature; on
                               pulse={pulse === s.id || pulse === keyOf(s.id)}
                               onOpen={() => setOpen(s.id)}
                               onPriority={(priority) => priority !== s.priority && op({ op: "update_story", storyId: s.id, priority })}
-                              onDragMove={(p) => setHover(colAt(p))}
+                              onDragMove={dragMove}
                               onDrop={(p) => drop(s, p)}
                             />
                           ))}
@@ -271,16 +252,14 @@ export default function StoriesTab({ feature, onChange }: { feature: Feature; on
                           <div className="grid flex-1 place-items-center py-6 font-mono text-[11px] text-grey/70">drop stories here</div>
                         )}
                       </div>
-                      {c.id !== NONE && (
-                        <QuickAdd
-                          open={compose === c.id}
-                          onOpen={() => setCompose(c.id)}
-                          onClose={() => setCompose((x) => (x === c.id ? null : x))}
-                          defaultRole={role}
-                          defaultPriority={c.seed.priority}
-                          onAdd={(s) => op({ op: "add_story", ...s, sliceId: c.seed.sliceId })}
-                        />
-                      )}
+                      <QuickAdd
+                        open={compose === c.id}
+                        onOpen={() => setCompose(c.id)}
+                        onClose={() => setCompose((x) => (x === c.id ? null : x))}
+                        defaultRole={role}
+                        defaultPriority={c.seed.priority}
+                        onAdd={(s) => op({ op: "add_story", ...s })}
+                      />
                     </motion.div>
                   );
                 })}
@@ -294,12 +273,13 @@ export default function StoriesTab({ feature, onChange }: { feature: Feature; on
                   layoutKey={keyOf(opened.id)}
                   keyOf={keyOf}
                   story={opened}
-                  slices={slices}
                   hidden={hidden}
                   run={lastRun(feature, opened.id)}
                   live={live.get(opened.id) ?? "untested"}
                   starting={starting === opened.id}
                   onOp={op}
+                  pieces={otherPieces}
+                  onMove={(pid) => void moveStory(opened, pid)}
                   onDelete={() => removeStory(opened)}
                   onDeleteCriterion={(a) =>
                     ops.removeLater(
@@ -341,7 +321,7 @@ function UndoToast({
     return () => clearTimeout(t);
   }, [undo, onDismiss]);
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex justify-center px-4">
+    <div className="pointer-events-none fixed inset-x-0 bottom-24 z-50 flex justify-center px-4">
       <AnimatePresence>
         {undo && (
           <motion.div
@@ -415,47 +395,10 @@ function EmptyState({ onGenerate, onWrite }: { onGenerate: () => void; onWrite: 
   );
 }
 
-function Skeleton() {
-  const [t, setT] = useState(0);
-  useEffect(() => {
-    const i = setInterval(() => setT((x) => x + 1), 1000);
-    return () => clearInterval(i);
-  }, []);
+function Writing({ startedAt }: { startedAt?: string }) {
   return (
-    <div className="space-y-6">
-      <div className="card p-7">
-        <div className="eyebrow mb-3">writing stories · {t}s</div>
-        <div className="shimmer h-11 w-72 rounded-xl" />
-        <div className="shimmer mt-3 h-3 w-96 max-w-full rounded" />
-        <div className="mt-6 flex gap-3">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="shimmer h-20 flex-1 rounded-2xl" />
-          ))}
-        </div>
-      </div>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        {[3, 2, 2].map((n, c) => (
-          <div key={c} className="space-y-3 rounded-[22px] bg-paper-2/70 p-3">
-            {Array.from({ length: n }, (_, i) => (
-              <motion.div
-                key={i}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: (c * 3 + i) * 0.06 }}
-                className="card space-y-2.5 p-4"
-              >
-                <div className="shimmer h-2.5 w-16 rounded" />
-                <div className="shimmer h-5 w-11/12 rounded" />
-                <div className="shimmer h-3 w-2/3 rounded" />
-                <div className="flex justify-between pt-1">
-                  <div className="shimmer h-3 w-12 rounded" />
-                  <div className="shimmer h-4 w-16 rounded-full" />
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        ))}
-      </div>
+    <div className="flex justify-center py-6">
+      <Scribe label="writing stories" startedAt={startedAt} labelAt="top" />
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import clsx from "clsx";
 import type { Feature, FeatureStatus } from "@/lib/types";
+import { allRuns, allStories } from "@/lib/pieces";
 import { ago } from "./time";
 
 const STATUS: Record<FeatureStatus, string> = {
@@ -24,12 +25,14 @@ export function FeatureCard({ f, onDelete }: { f: Feature; onDelete: () => void 
     return () => clearTimeout(t);
   }, [arm]);
 
-  const passing = f.stories.filter((s) => s.status === "passing").length;
+  const stories = allStories(f);
+  const passing = stories.filter((s) => s.status === "passing").length;
   const counts: [string, number][] = [
-    ["stories", f.stories.length],
-    ["flows", f.flowcharts.reduce((n, s) => n + s.charts.length, 0)],
-    ["sketches", f.mockups.length],
-    ["runs", f.runs.length],
+    ...(f.pieces.length > 1 ? [["pieces", f.pieces.length] as [string, number]] : []),
+    ["stories", stories.length],
+    ["flows", f.pieces.reduce((n, p) => n + p.flowcharts.reduce((m, s) => m + s.charts.length, 0), 0)],
+    ["sketches", f.pieces.reduce((n, p) => n + p.mockups.length, 0)],
+    ["runs", allRuns(f).length],
   ];
 
   return (
@@ -72,12 +75,12 @@ export function FeatureCard({ f, onDelete }: { f: Feature; onDelete: () => void 
       {f.brief && <p className="mt-2 line-clamp-1 text-sm text-grey">{f.brief}</p>}
 
       <div className="mt-auto pt-6">
-        {f.stories.length > 0 && (
+        {stories.length > 0 && (
           <div className="mb-4 h-1 overflow-hidden rounded-full bg-paper-2">
             <motion.div
               className="h-full rounded-full bg-ok"
               initial={{ width: 0 }}
-              animate={{ width: `${(passing / f.stories.length) * 100}%` }}
+              animate={{ width: `${(passing / stories.length) * 100}%` }}
               transition={{ type: "spring", stiffness: 80, damping: 20, delay: 0.2 }}
             />
           </div>

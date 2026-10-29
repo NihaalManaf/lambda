@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { nanoid } from "nanoid";
+import { migrateFeature } from "./pieces";
 import type { Feature, Settings } from "./types";
 
 // Local-first JSON store. Single user; writes are serialised in process and across processes (lockfile).
@@ -66,32 +67,34 @@ export function saveSettings(patch: Partial<Settings>): Settings {
 
 // ---------- features ----------
 
+// Read path migrates pre-pieces features (src/lib/pieces.ts); the migrated shape is persisted on the next write.
 export function listFeatures(): Feature[] {
-  return readJson<Feature[]>(FEATURES_FILE, []).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  return readJson<Feature[]>(FEATURES_FILE, [])
+    .map(migrateFeature)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 export function getFeature(featureId: string): Feature | undefined {
   return listFeatures().find((f) => f.id === featureId);
 }
 
-export function createFeature(title: string, brief: string): Feature {
+// New features start in the intake conversation: no pieces, no generation until the brief settles.
+export function createFeature(title: string, brief: string, phase: Feature["phase"] = "intake"): Promise<Feature> {
   const f: Feature = {
     id: id("ft"),
     title,
     brief,
+    phase,
     status: "shaping",
     createdAt: now(),
     updatedAt: now(),
     context: [],
-    flowcharts: [],
-    mockups: [],
-    stories: [],
-    runs: [],
-    schema: [],
-    queues: [],
+    pieces: [],
   };
-  writeJson(FEATURES_FILE, [f, ...listFeatures()]);
-  return f;
+  return locked(() => {
+    writeJson(FEATURES_FILE, [f, ...listFeatures()]);
+    return f;
+  });
 }
 
 // Read-modify-write, serialised twice over:

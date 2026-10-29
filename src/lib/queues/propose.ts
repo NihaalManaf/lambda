@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import { blanksToNull, featurePrompt, generate, type Nulls } from "../llm";
 import { getSettings, id, now } from "../store";
-import type { Feature } from "../types";
+import type { FeatureView } from "../types";
 import { ensureTopology, buildTopology } from "./cache";
 import { subgraph } from "./graph";
 import { applyQueueOps, diffTopologies, touched } from "./ops";
@@ -96,7 +96,7 @@ function context(t: Topology, text: string): string {
   return lines.slice(0, 160).join("\n");
 }
 
-export async function proposeFromPrompt(feature: Feature, text: string): Promise<QueueProposal> {
+export async function proposeFromPrompt(feature: FeatureView, text: string): Promise<QueueProposal> {
   const { topo } = await ensureTopology();
   const out = await generate({
     schema: Out, system: SYSTEM, effort: "medium", maxTokens: 4000,

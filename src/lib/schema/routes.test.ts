@@ -6,7 +6,7 @@ import { GET as table } from "@/app/api/schema/tables/[name]/route";
 import { DELETE as del, POST as propose } from "@/app/api/features/[id]/schema/route";
 import { GET as preview } from "@/app/api/features/[id]/schema/[pid]/route";
 import { createFeature, getSettings } from "@/lib/store";
-import type { Feature } from "@/lib/types";
+import type { FeatureView } from "@/lib/types";
 import type { MigrationView, SchemaHead } from "./types";
 
 const REPO = getSettings().repoPath;
@@ -27,9 +27,9 @@ describe.skipIf(!fs.existsSync(`${REPO}/migrations`))("schema routes", () => {
   });
 
   it("sql proposal: create, preview, delete", async () => {
-    const f = createFeature("refunds v2", "let staff partially refund");
+    const f = await createFeature("refunds v2", "let staff partially refund");
     const res = await propose(json({ source: "sql", sql: "alter table public.refund_requests add column partial boolean not null; drop table public.team;" }), ctx({ id: f.id }));
-    const nf = (await res.json()) as Feature;
+    const nf = (await res.json()) as FeatureView;
     const p = nf.schema![0];
     expect(p.source).toBe("sql");
     const v = (await (await preview(new Request("http://x"), ctx({ id: f.id, pid: p.id }))).json()) as MigrationView & { stale: boolean };
@@ -39,7 +39,7 @@ describe.skipIf(!fs.existsSync(`${REPO}/migrations`))("schema routes", () => {
     expect(v.sql).toContain("partial");
     const bad = await propose(json({ source: "sql", sql: "alter tabel x" }), ctx({ id: f.id }));
     expect(bad.status).toBe(502);
-    const after = (await (await del(new Request(`http://x?pid=${p.id}`, { method: "DELETE" }), ctx({ id: f.id }))).json()) as Feature;
+    const after = (await (await del(new Request(`http://x?pid=${p.id}`, { method: "DELETE" }), ctx({ id: f.id }))).json()) as FeatureView;
     expect(after.schema).toEqual([]);
   });
 });

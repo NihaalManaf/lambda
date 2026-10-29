@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeNote, StoryOp } from "@/lib/ops";
-import type { Feature } from "@/lib/types";
+import type { FeatureView } from "@/lib/types";
 import { applyStoryOpWith } from "@/lib/stories-apply";
 import { storiesApi } from "./api";
 
@@ -16,9 +16,9 @@ import { storiesApi } from "./api";
 export type Undo = { key: string; label: string; ops: StoryOp[]; hide: string[]; until: number };
 export const UNDO_MS = 5000;
 
-const ID_FIELDS = ["storyId", "criterionId", "sliceId", "after"] as const;
+const ID_FIELDS = ["storyId", "criterionId"] as const;
 
-export function useStoryOps(feature: Feature, onChange: (f: Feature) => void, onError: (msg: string) => void) {
+export function useStoryOps(feature: FeatureView, onChange: (f: FeatureView) => void, onError: (msg: string) => void) {
   const fid = feature.id;
   const latest = useRef(feature);
   // callbacks live in refs so `send`/`commit` stay stable (the unmount flush must not re-fire per render)
@@ -49,7 +49,7 @@ export function useStoryOps(feature: Feature, onChange: (f: Feature) => void, on
 
   const refetch = useCallback(async () => {
     try {
-      cb.current.onChange(await storiesApi.get(fid));
+      cb.current.onChange(await storiesApi.get(fid, latest.current.pieceId));
     } catch {
       /* keep what we have */
     }
@@ -77,7 +77,7 @@ export function useStoryOps(feature: Feature, onChange: (f: Feature) => void, on
       inflight.current++;
       queue.current = queue.current.then(async () => {
         try {
-          const { feature: f, notes } = await storiesApi.ops(fid, ops.map(translate));
+          const { feature: f, notes } = await storiesApi.ops(fid, ops.map(translate), false, draft.pieceId);
           // map temp ids we minted to the server's
           ops.forEach((op, i) => {
             const made = created[i];
@@ -87,12 +87,10 @@ export function useStoryOps(feature: Feature, onChange: (f: Feature) => void, on
               real.current.set(t, r);
               alias.current.set(r, alias.current.get(t) ?? t);
             };
-            if (op.op === "add_story" || op.op === "add_slice") {
+            if (op.op === "add_story") {
               bind(made[0], notes[i]?.ref);
-              if (op.op === "add_story") {
-                const st = f.stories.find((s) => s.id === notes[i]?.ref);
-                made.slice(1).forEach((t, j) => bind(t, st?.acceptance[j]?.id));
-              }
+              const st = f.stories.find((s) => s.id === notes[i]?.ref);
+              made.slice(1).forEach((t, j) => bind(t, st?.acceptance[j]?.id));
             }
             if (op.op === "add_criterion") {
               const sid = real.current.get(op.storyId) ?? op.storyId;
@@ -122,7 +120,7 @@ export function useStoryOps(feature: Feature, onChange: (f: Feature) => void, on
       clearTimeout(p.t);
       pending.current.delete(key);
       if (keepalive) {
-        storiesApi.ops(fid, p.u.ops.map(translate), true).catch(() => {});
+        storiesApi.ops(fid, p.u.ops.map(translate), true, latest.current.pieceId).catch(() => {});
         return;
       }
       send(p.u.ops);

@@ -1,19 +1,20 @@
 "use client";
 
-import type { Feature } from "@/lib/types";
 import { Hero } from "./Hero";
 import { Composer } from "./Composer";
-import { FeatureGrid } from "./FeatureGrid";
+import { Pipeline } from "./Pipeline";
 import { Manifesto } from "./Manifesto";
+import { SetupBanner } from "@/components/setup/SetupBanner";
 
-export function Home({ features }: { features: Feature[] }) {
+export function Home() {
   return (
     <main>
       <Hero />
       <div className="mx-auto max-w-3xl px-6">
+        <SetupBanner />
         <Composer />
       </div>
-      <FeatureGrid initial={features} />
+      <Pipeline />
       <Manifesto />
     </main>
   );

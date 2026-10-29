@@ -2,6 +2,8 @@ import os from "node:os";
 import { DATA_DIR, getSettings } from "@/lib/store";
 import { settingsView } from "@/components/settings/view";
 import SettingsForm from "@/components/settings/SettingsForm";
+import LambdaMd from "@/components/settings/LambdaMd";
+import { getLambdaMd } from "@/lib/lambdamd";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +19,7 @@ export default function SettingsPage() {
         data · {DATA_DIR.replace(os.homedir(), "~")}
       </p>
       <SettingsForm initial={settingsView(getSettings())} />
+      <LambdaMd initial={getLambdaMd()} />
     </main>
   );
 }

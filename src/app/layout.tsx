@@ -39,7 +39,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               λ lambda
             </Link>
             <div className="no-scrollbar flex min-w-0 items-center gap-4 overflow-x-auto text-sm text-ink-2 sm:gap-6">
-              <Link href="/" className="hover:text-ink">
+              <Link href="/features" className="hover:text-ink">
                 features
               </Link>
               <Link href="/sources" className="hover:text-ink">

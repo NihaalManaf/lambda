@@ -9,8 +9,9 @@ import {
   useReducedMotion,
 } from "motion/react";
 import clsx from "clsx";
+import Painter from "@/components/Painter";
 import type { ChangeNote, FlowOp } from "@/lib/ops";
-import { autoLenses, type EdgeCase, type Feature, type FlowLens, type FlowchartSet } from "@/lib/types";
+import { autoLenses, type EdgeCase, type FeatureView, type FlowLens, type FlowchartSet } from "@/lib/types";
 import { notify } from "@/lib/desktop";
 import FlowChart, { type ChartOp } from "./FlowChart";
 import { applyGraphOp, isGraphOp } from "@/lib/flow-graph";
@@ -53,7 +54,7 @@ const LENSES: { v: FlowLens; label: string; blurb: string; cta: string }[] = [
 
 const spring = { type: "spring", duration: 0.4, bounce: 0.12 } as const;
 
-type Res = { feature: Feature; notes: ChangeNote[] };
+type Res = { feature: FeatureView; notes: ChangeNote[] };
 
 const chartHas = (c: FlowchartSet["charts"][number], ref: string) =>
   c.id === ref || c.nodes.some((n) => n.id === ref) || c.edges.some((e) => e.id === ref) || c.edgeCases.some((x) => x.id === ref);
@@ -62,8 +63,8 @@ export default function FlowTab({
   feature,
   onChange,
 }: {
-  feature: Feature;
-  onChange: (f: Feature) => void;
+  feature: FeatureView;
+  onChange: (f: FeatureView) => void;
 }) {
   const [lens, setLens] = useState<FlowLens>(
     () =>
@@ -81,7 +82,7 @@ export default function FlowTab({
     live.current = feature;
   }, [feature]);
   const seq = useRef(0);
-  const commit = (f: Feature) => {
+  const commit = (f: FeatureView) => {
     live.current = f;
     onChange(f);
   };
@@ -111,7 +112,8 @@ export default function FlowTab({
     const res = await fetch(url, {
       method,
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
+      // every call is scoped to the selected piece (routes read body.pieceId; item routes find the owner)
+      body: JSON.stringify(body && typeof body === "object" && !Array.isArray(body) ? { pieceId: feature.pieceId || undefined, ...body } : body),
     });
     const out = await res
       .json()
@@ -170,7 +172,7 @@ export default function FlowTab({
     ec.handled = handled;
     commit(next);
     const mine = ++seq.current;
-    post<Feature>(
+    post<FeatureView>(
       `${base}/flows`,
       { setId, chartId, edgeCaseId, handled },
       "PATCH",
@@ -215,7 +217,7 @@ export default function FlowTab({
     setDrawing((d) => [...d, l]);
     setError(null);
     try {
-      const f = await post<Feature>(`${base}/flows`, {
+      const f = await post<FeatureView>(`${base}/flows`, {
         lens: l,
         focus: focus?.trim() || undefined,
       });
@@ -335,7 +337,13 @@ export default function FlowTab({
           )}
 
           <AnimatePresence initial={false} mode="popLayout">
-            {isDrawing(shown) && <Skeleton key="skeleton" lens={shown} />}
+            {isDrawing(shown) && (
+              <Drawing
+                key="drawing"
+                lens={shown}
+                startedAt={!drawing.includes(shown) && jobBusy ? flowJob?.startedAt : undefined}
+              />
+            )}
             {sets.map((s) => (
               <SetView
                 key={s.id}
@@ -351,7 +359,19 @@ export default function FlowTab({
             ))}
           </AnimatePresence>
 
-          {!isDrawing(shown) && sets.length === 0 && (
+          {/* a piece split off an older feature: its flows were never drawn — one click, scoped to the piece */}
+          {!isDrawing(shown) && sets.length === 0 && feature.flowcharts.length === 0 && feature.pieces.length > 1 && (
+            <PieceFlowsEmpty
+              key={`piece-${feature.pieceId}`}
+              busy={jobBusy}
+              onGenerate={() =>
+                post<FeatureView>(`${base}/jobs`, { kinds: ["flows"] })
+                  .then(commit)
+                  .catch(fail)
+              }
+            />
+          )}
+          {!isDrawing(shown) && sets.length === 0 && !(feature.flowcharts.length === 0 && feature.pieces.length > 1) && (
             <EmptyLens
               key={shown}
               meta={meta}
@@ -374,7 +394,7 @@ function LensBar({
 }: {
   lens: FlowLens;
   onPick: (l: FlowLens) => void;
-  feature: Feature;
+  feature: FeatureView;
   isDrawing: (l: FlowLens) => boolean;
 }) {
   return (
@@ -512,6 +532,36 @@ function DrawMore({
         )}
       </button>
     </div>
+  );
+}
+
+function PieceFlowsEmpty({ busy, onGenerate }: { busy: boolean; onGenerate: () => Promise<unknown> }) {
+  const reduce = useReducedMotion();
+  const [sent, setSent] = useState(false);
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: reduce ? 0 : 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.22, ease: [0.23, 1, 0.32, 1] }}
+      className="card mx-auto flex max-w-xl flex-col items-start gap-3 px-6 py-6 sm:flex-row sm:items-center sm:justify-between"
+    >
+      <div>
+        <div className="text-[15px] font-semibold text-ink">no flows for this piece yet</div>
+        <div className="mt-0.5 text-[13px] text-grey">drawn from this piece&apos;s stories only.</div>
+      </div>
+      <button
+        type="button"
+        disabled={busy || sent}
+        onClick={() => {
+          setSent(true);
+          void onGenerate().finally(() => setSent(false)); // the job's own busy state takes over
+        }}
+        className="btn btn-primary shrink-0 justify-center"
+      >
+        {busy || sent ? "drawing…" : "draw this piece's flows"}
+        {!(busy || sent) && <Icon.arrow size={14} />}
+      </button>
+    </motion.div>
   );
 }
 
@@ -685,7 +735,7 @@ function SetView({
   );
 }
 
-function Skeleton({ lens }: { lens: FlowLens }) {
+function Drawing({ lens, startedAt }: { lens: FlowLens; startedAt?: string }) {
   return (
     <motion.section
       layout="position"
@@ -693,33 +743,9 @@ function Skeleton({ lens }: { lens: FlowLens }) {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, transition: { duration: 0.15 } }}
       transition={spring}
-      className="space-y-4"
+      className="flex justify-center py-6"
     >
-      <div>
-        <div className="eyebrow">{lens.replace("-", " ")} · drawing</div>
-        <div className="shimmer mt-2 h-9 w-64 rounded-lg" />
-      </div>
-      {[0, 1].map((i) => (
-        <div key={i} className="card flex overflow-hidden">
-          <div className="flex flex-1 flex-col items-center gap-5 py-8">
-            {[96, 150, 120, 96].map((w, j) => (
-              <div
-                key={j}
-                className={clsx(
-                  "shimmer h-10",
-                  j === 0 || j === 3 ? "rounded-full" : "rounded-2xl",
-                )}
-                style={{ width: w }}
-              />
-            ))}
-          </div>
-          <div className="hidden w-80 space-y-3 border-l border-line p-4 md:block">
-            {[0, 1, 2].map((j) => (
-              <div key={j} className="shimmer h-5 rounded-md" />
-            ))}
-          </div>
-        </div>
-      ))}
+      <Painter label={`drawing ${lens.replace("-", " ")}`} startedAt={startedAt} size="sm" labelAt="top" />
     </motion.section>
   );
 }

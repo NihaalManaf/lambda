@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import clsx from "clsx";
-import type { Feature, Story, StoryStatus } from "@/lib/types";
+import type { FeatureView, Story, StoryStatus } from "@/lib/types";
 import type { Run } from "@/lib/runs";
 import type { MaskedAccount } from "@/components/settings/types";
 import { asA } from "@/components/stories/bits";
@@ -18,7 +18,7 @@ const ago = (iso: string, now: number) => {
   return s < 60 ? "just now" : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`;
 };
 
-export default function VerifyTab({ feature, onChange }: { feature: Feature; onChange: (f: Feature) => void }) {
+export default function VerifyTab({ feature, onChange }: { feature: FeatureView; onChange: (f: FeatureView) => void }) {
   const runs = feature.runs as Run[];
   const [accounts, setAccounts] = useState<MaskedAccount[]>([]);
   const [accountId, setAccountId] = useState("");
@@ -75,7 +75,7 @@ export default function VerifyTab({ feature, onChange }: { feature: Feature; onC
       const fresh = got.filter((r): r is Run => !!r);
       if (fresh.some((r) => !isActive(r.status))) {
         const f = await fetch(`/api/features/${fid}`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
-        if (!stop && f) return onChange(f as Feature);
+        if (!stop && f) return onChange(f as FeatureView);
       }
       const cur = latest.current;
       if (!stop && fresh.length)

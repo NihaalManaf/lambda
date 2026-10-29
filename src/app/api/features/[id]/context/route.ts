@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { pieceIdFrom, pieceView } from "@/lib/pieces";
 import { getFeature, id, updateFeature } from "@/lib/store";
 import type { ContextRef } from "@/lib/types";
 
@@ -25,7 +26,7 @@ export async function POST(req: Request, { params }: Ctx) {
   const f = await updateFeature(featureId, (f) => {
     if (!f.context.some((c) => c.id === ref.id)) f.context.push(ref);
   });
-  return NextResponse.json(f);
+  return NextResponse.json(pieceView(f, pieceIdFrom(req.url)));
 }
 
 export async function DELETE(req: Request, { params }: Ctx) {
@@ -36,5 +37,5 @@ export async function DELETE(req: Request, { params }: Ctx) {
   const f = await updateFeature(featureId, (f) => {
     f.context = f.context.filter((c) => c.id !== refId);
   });
-  return NextResponse.json(f);
+  return NextResponse.json(pieceView(f, pieceIdFrom(req.url)));
 }

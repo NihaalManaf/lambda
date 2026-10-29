@@ -48,7 +48,7 @@ export function Hero() {
             animate={{ opacity: 1, x: 0, ...drift(1) }}
             transition={{ opacity: { duration: 0.9 }, x: { type: "spring", stiffness: 70, damping: 18 }, y: loop(8), rotate: loop(10) }}
           >
-            <Image src="/art/muse-astro.webp" alt="" width={878} height={1325} priority className="statue-fade" />
+            <Image src="/art/muse-astro.webp" alt="" width={878} height={1325} priority className="statue-fade-low" />
           </motion.div>
         </motion.div>
 

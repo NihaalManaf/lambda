@@ -2,7 +2,7 @@
 
 import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import clsx from "clsx";
-import type { Feature, Priority, Story, VerificationRun } from "@/lib/types";
+import type { FeatureView, Priority, Story, VerificationRun } from "@/lib/types";
 
 // Tiny shared pieces for the story board.
 
@@ -21,7 +21,7 @@ export const asA = (role: string) => {
 
 export type Live = "untested" | "running" | "passing" | "failing";
 
-export function lastRun(f: Feature, storyId: string): VerificationRun | undefined {
+export function lastRun(f: FeatureView, storyId: string): VerificationRun | undefined {
   let best: VerificationRun | undefined;
   for (const r of f.runs) if (r.storyId === storyId && (!best || r.startedAt > best.startedAt)) best = r;
   return best;

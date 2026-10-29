@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { allRuns } from "@/lib/pieces";
 import { getFeature, listFeatures } from "@/lib/store";
 import type { Run } from "@/lib/runs";
 import { reapIfLost } from "@/lib/verify";
@@ -11,7 +12,7 @@ export async function GET(req: Request, { params }: Ctx) {
   const fid = new URL(req.url).searchParams.get("feature");
   const features = fid ? [getFeature(fid)].filter((f) => !!f) : listFeatures();
   for (const f of features) {
-    const run = f.runs.find((r) => r.id === runId) as Run | undefined;
+    const run = allRuns(f).find((r) => r.id === runId) as Run | undefined;
     if (run) return NextResponse.json(await reapIfLost(f.id, run));
   }
   return NextResponse.json({ error: "not found" }, { status: 404 });

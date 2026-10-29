@@ -1,5 +1,5 @@
 import type { ChangeNote, FlowOp } from "@/lib/ops";
-import { MAX_FLOW_NODES, type EdgeCase, type Feature, type FlowEdge, type FlowNode, type Flowchart, type FlowchartSet } from "@/lib/types";
+import { MAX_FLOW_NODES, type EdgeCase, type FlowEdge, type FlowNode, type Flowchart, type FlowchartSet } from "@/lib/types";
 
 // Pure, deterministic flowchart edits. No server deps: the server applies them inside updateFeature
 // (src/lib/flows.ts applyFlowOp) and the client runs the same code for optimistic updates, so ids match.
@@ -143,7 +143,7 @@ export function spliceParts(set: FlowchartSet, index: number, parts: Flowchart[]
 
 // ---------- lookup + deterministic ids ----------
 
-export function locate(feature: Feature, setId: string, chartId: string): { set: FlowchartSet; chart: Flowchart; index: number } {
+export function locate(feature: { flowcharts: FlowchartSet[] }, setId: string, chartId: string): { set: FlowchartSet; chart: Flowchart; index: number } {
   const set = feature.flowcharts.find((s) => s.id === setId);
   if (!set) throw new Error("flow set not found");
   const index = set.charts.findIndex((c) => c.id === chartId);
@@ -202,7 +202,7 @@ const note = (sign: ChangeNote["sign"], what: ChangeNote["what"], label: string,
 });
 
 // Mutates feature in place. Throws on bad references. Splits a chart that grows past MAX_FLOW_NODES.
-export function applyGraphOp(feature: Feature, op: GraphOp): GraphResult {
+export function applyGraphOp(feature: { flowcharts: FlowchartSet[] }, op: GraphOp): GraphResult {
   const { set, chart: c, index } = locate(feature, op.setId, op.chartId);
   const before: Flowchart = structuredClone(c);
   let n: ChangeNote;

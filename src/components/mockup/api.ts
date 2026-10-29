@@ -1,6 +1,6 @@
-import type { Annotation, Feature, Mockup } from "@/lib/types";
+import type { Annotation, FeatureView, Job, Mockup } from "@/lib/types";
 
-// Client calls for the sketch tool. Every mutation returns the whole Feature.
+// Client calls for the sketch tool. Every mutation returns the whole FeatureView.
 
 export type SketchMockup = Mockup & { intent?: string; thumb?: string };
 
@@ -13,20 +13,20 @@ async function call<T>(url: string, init?: RequestInit): Promise<{ data: T; res:
 
 const base = (fid: string) => `/api/features/${fid}/mockups`;
 
-export async function captureMockup(fid: string, body: { url?: string; path?: string; accountId?: string; intent?: string }) {
-  const { data, res } = await call<Feature>(base(fid), { method: "POST", body: JSON.stringify(body) });
+export async function captureMockup(fid: string, body: { url?: string; path?: string; accountId?: string; intent?: string; pieceId?: string }) {
+  const { data, res } = await call<FeatureView>(base(fid), { method: "POST", body: JSON.stringify(body) });
   const warn = res.headers.get("x-sketch-error");
   return { feature: data, sketchError: warn ? decodeURIComponent(warn) : undefined };
 }
 
 export const resketch = (fid: string, mid: string, intent: string) =>
-  call<Feature>(`${base(fid)}/${mid}/sketch`, { method: "POST", body: JSON.stringify({ intent }) }).then((r) => r.data);
+  call<FeatureView>(`${base(fid)}/${mid}/sketch`, { method: "POST", body: JSON.stringify({ intent }) }).then((r) => r.data);
 
 export const saveAnnotations = (fid: string, mid: string, annotations: Annotation[]) =>
-  call<Feature>(`${base(fid)}/${mid}`, { method: "PATCH", body: JSON.stringify({ annotations }) }).then((r) => r.data);
+  call<FeatureView>(`${base(fid)}/${mid}`, { method: "PATCH", body: JSON.stringify({ annotations }) }).then((r) => r.data);
 
 export const deleteMockup = (fid: string, mid: string) =>
-  call<Feature>(`${base(fid)}/${mid}`, { method: "DELETE" }).then((r) => r.data);
+  call<FeatureView>(`${base(fid)}/${mid}`, { method: "DELETE" }).then((r) => r.data);
 
 export const shotUrl = (name: string) => `/api/shots/${encodeURIComponent(name)}`;
 
@@ -45,3 +45,11 @@ export async function loadSettings(): Promise<SettingsLite> {
     return { frontendUrl: "http://localhost:3000", accounts: [] };
   }
 }
+
+// the background sketch job couldn't reach the user's app (src/lib/autosketch.ts AppDown)
+// app down, or another repo's dev server on the app port ("localhost:3000 is serving x/y, not webapp")
+export const appDown = (j?: Job) => j?.status === "error" && /^app not running at | is serving .+, not /.test(j.error ?? "");
+
+// re-run the background sketch job for one piece
+export const startSketchJob = (fid: string, pieceId?: string) =>
+  call<FeatureView>(`/api/features/${fid}/jobs`, { method: "POST", body: JSON.stringify({ kinds: ["sketch"], pieceId }) }).then((r) => r.data);

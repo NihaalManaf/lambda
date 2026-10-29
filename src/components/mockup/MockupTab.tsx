@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { nanoid } from "nanoid";
-import type { Annotation, AnnotationKind, Box, Feature } from "@/lib/types";
-import { captureMockup, deleteMockup, loadSettings, resketch, saveAnnotations, shotUrl, type SettingsLite, type SketchMockup } from "./api";
+import type { Annotation, AnnotationKind, Box, FeatureView } from "@/lib/types";
+import Painter from "@/components/Painter";
+import { appDown, captureMockup, deleteMockup, loadSettings, resketch, saveAnnotations, shotUrl, startSketchJob, type SettingsLite, type SketchMockup } from "./api";
 import AnnotationList from "./AnnotationList";
 import CaptureBar, { type CaptureInput } from "./CaptureBar";
 import KindIcon from "./KindIcon";
@@ -27,9 +28,15 @@ function phaseOf(job: Job, sec: number) {
 }
 
 const spring = { type: "spring", stiffness: 420, damping: 36 } as const;
+// event-time stamp for the local job timer (handlers only)
+const stamp = () => Date.now();
 
-export default function MockupTab({ feature, onChange }: { feature: Feature; onChange: (f: Feature) => void }) {
-  const mockups = feature.mockups as SketchMockup[];
+export default function MockupTab({ feature, onChange }: { feature: FeatureView; onChange: (f: FeatureView) => void }) {
+  // auto sketches (the background job) first, then manual captures, each newest first as stored
+  const mockups = [...feature.mockups.filter((m) => m.auto), ...feature.mockups.filter((m) => !m.auto)] as SketchMockup[];
+  const autoJob = feature.jobs?.find((j) => j.kind === "sketch");
+  const autoBusy = autoJob?.status === "queued" || autoJob?.status === "running";
+  const down = appDown(autoJob);
   const rootRef = useRef<HTMLDivElement>(null);
   const [settings, setSettings] = useState<SettingsLite | null>(null);
   const [activeId, setActiveId] = useState<string | null>(mockups[0]?.id ?? null);
@@ -117,6 +124,7 @@ export default function MockupTab({ feature, onChange }: { feature: Feature; onC
         ...(isUrl ? { url: c.target } : { path: c.target }),
         accountId: c.accountId,
         intent: c.intent || undefined,
+        pieceId: feature.pieceId || undefined,
       });
       onChange(f);
       setActiveId(f.mockups[0]?.id ?? null);
@@ -133,7 +141,7 @@ export default function MockupTab({ feature, onChange }: { feature: Feature; onC
     if (!active || job) return;
     setError(null);
     await flush();
-    setJob({ kind: "sketch", label: active.title, withSketch: true, t0: Date.now() });
+    setJob({ kind: "sketch", label: active.title, withSketch: true, t0: stamp() });
     setSec(0);
     setSelId(null);
     try {
@@ -178,9 +186,77 @@ export default function MockupTab({ feature, onChange }: { feature: Feature; onC
 
   const capturing = job?.kind === "capture";
 
+  // start / re-run the background sketch job for this piece
+  const [starting, setStarting] = useState(false);
+  const retryAuto = async () => {
+    if (starting) return;
+    setError(null);
+    setStarting(true);
+    try {
+      onChange(await startSketchJob(feature.id, feature.pieceId || undefined));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setStarting(false);
+    }
+  };
+
   return (
     <div ref={rootRef} className="flex flex-col gap-6">
       <CaptureBar settings={settings} busy={Boolean(job)} onCapture={capture} />
+
+      <AnimatePresence initial={false}>
+        {down && !autoBusy && (
+          <motion.div key="down" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={spring}>
+            <AppDownCard url={settings?.frontendUrl ?? autoJob?.error?.replace(/^app not running at /, "") ?? ""} reason={autoJob?.error} onRetry={retryAuto} />
+          </motion.div>
+        )}
+        {autoJob?.status === "error" && !down && !autoBusy && (
+          <motion.button
+            key="autoerr"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={retryAuto}
+            title={autoJob.error}
+            className="chip self-start !border-bad/40 text-bad"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-bad" /> auto sketch failed · retry
+          </motion.button>
+        )}
+        {autoJob?.status === "done" && !autoBusy && (
+          <motion.div key="note" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 self-start">
+            {autoJob.note && <AutoNote note={autoJob.note} />}
+            <button onClick={retryAuto} disabled={starting} className="chip hover:border-ink disabled:opacity-50">
+              auto-sketch again
+            </button>
+          </motion.div>
+        )}
+        {!autoJob && (
+          <motion.button
+            key="start"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={retryAuto}
+            disabled={starting}
+            className="chip self-start hover:border-ink disabled:opacity-50"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-lilac" /> auto-sketch this piece
+          </motion.button>
+        )}
+      </AnimatePresence>
+
+      {autoBusy && (
+        <div className={mockups.length ? "flex items-center gap-3" : "flex justify-center py-6"}>
+          <Painter
+            label={autoJob?.status === "queued" ? "waiting for stories" : "sketching your app"}
+            startedAt={autoJob?.startedAt}
+            size={mockups.length ? "xs" : "md"}
+            labelAt={mockups.length ? "bottom" : "top"}
+          />
+        </div>
+      )}
 
       <AnimatePresence>
         {error && (
@@ -228,6 +304,7 @@ export default function MockupTab({ feature, onChange }: { feature: Feature; onC
                   <div className="relative aspect-[4/3] overflow-hidden rounded-xl border border-line bg-paper-2">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={shotUrl(m.thumb ?? m.shot)} alt="" loading="lazy" className="h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-[1.03]" />
+                    {m.auto && <span className="chip absolute left-1.5 top-1.5 !px-1.5 !py-0 font-mono !text-[10px] text-grey">auto</span>}
                     {m.annotations.length > 0 && (
                       <span className="chip absolute bottom-1.5 left-1.5 !py-0 font-hand !text-[13px] !text-marker">
                         {m.annotations.length} marks
@@ -253,7 +330,7 @@ export default function MockupTab({ feature, onChange }: { feature: Feature; onC
       )}
 
       {capturing && !active && <Pending text={phaseOf(job, sec)} />}
-      {!active && !job && <Empty />}
+      {!active && !job && !autoBusy && !down && <Empty />}
 
       {active && (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
@@ -331,7 +408,7 @@ export default function MockupTab({ feature, onChange }: { feature: Feature; onC
                   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) runSketch();
                 }}
               />
-              <button className="btn btn-lilac self-start" disabled={Boolean(job) || !intent.trim()} onClick={runSketch}>
+              <button className="btn btn-lilac self-start" disabled={Boolean(job) || !intent.trim()} onClick={() => void runSketch()}>
                 {job?.kind === "sketch" ? "sketching…" : anns.length ? "re-sketch" : "sketch it"}
               </button>
             </div>
@@ -371,6 +448,51 @@ function Pending({ text }: { text: string }) {
       <motion.span key={text} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="relative font-hand text-2xl">
         {text}…
       </motion.span>
+    </div>
+  );
+}
+
+// the job's caveat line; a pointer at settings becomes a link there
+function AutoNote({ note }: { note: string }) {
+  const i = note.indexOf("in settings");
+  if (i < 0) return <span className="font-mono text-[11px] text-grey">{note}</span>;
+  return (
+    <span className="font-mono text-[11px] text-grey">
+      {note.slice(0, i)}
+      <a href="/settings" className="text-ink underline decoration-line-2 underline-offset-2 hover:decoration-ink">
+        in settings
+      </a>
+      {note.slice(i + "in settings".length)}
+    </span>
+  );
+}
+
+function AppDownCard({ url, reason, onRetry }: { url: string; reason?: string; onRetry: () => void }) {
+  const other = reason?.match(/ is serving (.+), not (.+)$/);
+  return (
+    <div className="card flex flex-wrap items-center gap-4 px-6 py-5">
+      <div className="min-w-0 flex-1">
+        <div className="eyebrow">auto sketch · waiting</div>
+        {other ? (
+          <>
+            <p className="mt-1 text-[15px] text-ink-2">
+              <span className="font-mono text-[13px] text-ink">{url.replace(/^https?:\/\//, "")}</span> is running{" "}
+              <span className="font-mono text-[13px] text-ink">{other[1]}</span>, not {other[2]}
+            </p>
+            <p className="mt-0.5 text-[13px] text-grey">stop that server or change app url in settings, then retry.</p>
+          </>
+        ) : (
+          <>
+            <p className="mt-1 text-[15px] text-ink-2">
+              your app isn&apos;t running at <span className="font-mono text-[13px] text-ink">{url.replace(/^https?:\/\//, "")}</span>
+            </p>
+            <p className="mt-0.5 text-[13px] text-grey">start it, then retry. manual capture still works.</p>
+          </>
+        )}
+      </div>
+      <button className="btn btn-ghost" onClick={onRetry}>
+        retry
+      </button>
     </div>
   );
 }

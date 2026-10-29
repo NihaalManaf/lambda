@@ -44,9 +44,10 @@ const USER_INPUTS = [
   'input[type="text"]',
 ];
 
-async function login(ctx: BrowserContext, acc: TestAccount) {
+// base: the origin being captured (lambda's stack or the configured app); a relative loginUrl resolves against it
+async function login(ctx: BrowserContext, acc: TestAccount, base: string) {
   const page = await ctx.newPage();
-  await page.goto(loginHref(acc, getSettings().frontendUrl), { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT });
+  await page.goto(loginHref(acc, base), { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT });
   await settle(page, 8000);
 
   const user = await firstVisible(page, USER_INPUTS);
@@ -68,7 +69,7 @@ async function login(ctx: BrowserContext, acc: TestAccount) {
   await (submit ? submit.click() : pass.press("Enter"));
   await page.waitForURL((u) => u.href !== before, { timeout: 15_000 }).catch(() => undefined);
   await settle(page);
-  if (await isLoginPage(page, acc)) throw new Error("login: still on login page — check test account");
+  if (await isLoginPage(page, acc, base)) throw new Error("login: still on login page — check test account");
 
   fs.mkdirSync(AUTH_DIR, { recursive: true });
   await ctx.storageState({ path: authFile(acc.id) });
@@ -76,8 +77,8 @@ async function login(ctx: BrowserContext, acc: TestAccount) {
   await page.close();
 }
 
-async function isLoginPage(page: Page, acc: TestAccount) {
-  const loginPath = new URL(loginHref(acc, getSettings().frontendUrl)).pathname;
+async function isLoginPage(page: Page, acc: TestAccount, base: string) {
+  const loginPath = new URL(loginHref(acc, base)).pathname;
   if (loginPath !== "/" && new URL(page.url()).pathname.startsWith(loginPath)) return true;
   return page
     .locator('input[type="password"]')
@@ -157,21 +158,74 @@ function dedupe(raw: (Omit<DomBox, "idx"> & { tier: number })[]) {
 
 // ---------- capture ----------
 
-export async function captureUrl(opts: {
+// One browser against the user's app at a time, process-wide (every sketch job + manual captures share it;
+// it also keeps two logins from writing the same auth file). On globalThis so HMR keeps one queue.
+const G = globalThis as { __lambdaCaptureTail?: Promise<unknown> };
+
+async function exclusive<T>(signal: AbortSignal | undefined, fn: () => Promise<T>): Promise<T> {
+  const prev = G.__lambdaCaptureTail ?? Promise.resolve();
+  let release!: () => void;
+  const mine = new Promise<void>((r) => (release = r));
+  G.__lambdaCaptureTail = prev.then(() => mine);
+  try {
+    await new Promise<void>((res, rej) => {
+      if (signal?.aborted) return rej(new Error("out of time"));
+      const onAbort = () => rej(new Error("out of time"));
+      signal?.addEventListener("abort", onAbort, { once: true });
+      prev.then(
+        () => (signal?.removeEventListener("abort", onAbort), res()),
+        () => (signal?.removeEventListener("abort", onAbort), res()),
+      );
+    });
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
+// every failure while signing in reads "login: …" (the auto sketch falls back to signed out on those)
+const asLogin = (e: unknown) => {
+  const msg = e instanceof Error ? e.message : String(e);
+  return new Error(msg.startsWith("login:") ? msg : `login: ${msg.split("\n")[0]}`);
+};
+
+// mask data values (emails, phone numbers, long digit runs) before element text is stored or sent to the model
+export function maskText(s: string): string {
+  return s
+    .replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, "[email]")
+    .replace(/\+?\d[\d\s().-]{7,}\d/g, "[number]")
+    .replace(/\d{5,}/g, "[number]");
+}
+
+export function captureUrl(opts: {
   url: string;
   accountId?: string;
   viewport?: { width: number; height: number };
+  signal?: AbortSignal; // abort closes the browser; a shot finished after it is removed
 }): Promise<Capture> {
+  return exclusive(opts.signal, () => captureNow(opts));
+}
+
+async function captureNow(opts: Parameters<typeof captureUrl>[0]): Promise<Capture> {
   const viewport = opts.viewport ?? { width: 1280, height: 800 };
   const acc = opts.accountId ? getSettings().accounts.find((a) => a.id === opts.accountId) : undefined;
   if (opts.accountId && !acc) throw new Error(`unknown test account ${opts.accountId}`);
+  const aborted = () => {
+    if (opts.signal?.aborted) throw new Error("out of time");
+  };
+  aborted();
+  const base = new URL(opts.url).origin;
 
   const browser = await chromium.launch({ headless: true });
+  const onAbort = () => void browser.close().catch(() => undefined);
+  opts.signal?.addEventListener("abort", onAbort, { once: true });
+  let shot: string | undefined;
   try {
+    aborted();
     const stored = acc && fs.existsSync(authFile(acc.id)) ? authFile(acc.id) : undefined;
     const ctx = await browser.newContext({ viewport, deviceScaleFactor: 1, storageState: stored });
     await ctx.addInitScript("window.__name = window.__name || ((f) => f)"); // esbuild keepNames shim for evaluate()
-    if (acc && !stored) await login(ctx, acc);
+    if (acc && !stored) await login(ctx, acc, base).catch((e) => Promise.reject(asLogin(e)));
 
     const page = await ctx.newPage();
     const open = async () => {
@@ -179,8 +233,8 @@ export async function captureUrl(opts: {
       await settle(page);
     };
     await open();
-    if (acc && (await isLoginPage(page, acc))) {
-      await login(ctx, acc); // stale session
+    if (acc && (await isLoginPage(page, acc, base))) {
+      await login(ctx, acc, base).catch((e) => Promise.reject(asLogin(e))); // stale session
       await open();
     }
 
@@ -201,7 +255,7 @@ export async function captureUrl(opts: {
     );
     const height = Math.min(Math.max(fullHeight, viewport.height), MAX_HEIGHT);
     const shotId = id("shot");
-    const shot = `${shotId}.png`;
+    shot = `${shotId}.png`;
     await page.screenshot({
       path: path.join(SHOTS_DIR, shot),
       fullPage: true,
@@ -211,6 +265,7 @@ export async function captureUrl(opts: {
 
     const raw = await page.evaluate(collectBoxes, { maxHeight: height, max: MAX_ELEMENTS });
     const thumb = await makeThumb(shotId, viewport.width, height);
+    aborted();
 
     return {
       shot,
@@ -219,9 +274,13 @@ export async function captureUrl(opts: {
       title: (await page.title()).slice(0, 80) || new URL(page.url()).pathname,
       width: viewport.width,
       height,
-      elements: dedupe(raw),
+      elements: dedupe(raw).map((e) => ({ ...e, text: maskText(e.text) })),
     };
+  } catch (e) {
+    if (shot) removeShot(shot);
+    throw opts.signal?.aborted ? new Error("out of time") : e;
   } finally {
+    opts.signal?.removeEventListener("abort", onAbort);
     await browser.close().catch(() => undefined);
   }
 }

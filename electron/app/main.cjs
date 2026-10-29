@@ -564,7 +564,7 @@ function buildMenu() {
     {
       label: "Go",
       submenu: [
-        { label: "Features", accelerator: "Cmd+1", click: go("/") },
+        { label: "Features", accelerator: "Cmd+1", click: go("/features") },
         { label: "Sources", accelerator: "Cmd+2", click: go("/sources") },
         { label: "Settings", accelerator: "Cmd+3", click: go("/settings") },
         { type: "separator" },
@@ -637,9 +637,10 @@ function notify(title, body, onClick) {
 
 async function runFinished(a) {
   const f = await getJson(`/api/features/${encodeURIComponent(a.featureId)}`);
-  const run = f?.runs?.find((r) => r.id === a.id);
+  const pieces = f?.pieces ?? (f ? [f] : []); // runs + stories live in the feature's pieces
+  const run = pieces.flatMap((p) => p.runs ?? []).find((r) => r.id === a.id);
   if (!f || !run) return;
-  const story = f.stories?.find((s) => s.id === run.storyId);
+  const story = pieces.flatMap((p) => p.stories ?? []).find((s) => s.id === run.storyId);
   const what = story ? `as ${story.role}, ${story.want}` : f.title;
   const mark = run.status === "passed" ? "✓ passed" : run.status === "failed" ? "✗ failed" : "⚠ errored";
   notify(`${mark} — ${f.title}`, what, () => send({ type: "navigate", path: `/f/${encodeURIComponent(f.id)}` }));

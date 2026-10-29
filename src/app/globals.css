@@ -301,6 +301,21 @@ html.boot .enter-fade {
   -webkit-mask-image: linear-gradient(to bottom, #000 38%, transparent 72%);
   mask-image: linear-gradient(to bottom, #000 38%, transparent 72%);
 }
+/* terminal caret on the home pipeline's session cards */
+@keyframes caret {
+  50% {
+    opacity: 0;
+  }
+}
+.caret {
+  animation: caret 1s steps(1) infinite;
+}
+
+/* muse: a touch more shoulder, fading out on the same line as the sage (76% of her height = 72% of his) */
+.statue-fade-low {
+  -webkit-mask-image: linear-gradient(to bottom, #000 44%, transparent 76%);
+  mask-image: linear-gradient(to bottom, #000 44%, transparent 76%);
+}
 
 /* ERD motion (schema tab): nodes that persist across migrations glide to their new spot, new ones fade in,
    edges blink out while nodes move so paths never lag behind their tables. */

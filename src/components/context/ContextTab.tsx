@@ -4,9 +4,10 @@ import Image from "next/image";
 import clsx from "clsx";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { ContextOp } from "@/lib/ops";
-import type { ContextRef, Feature } from "@/lib/types";
+import type { ContextRef, FeatureView } from "@/lib/types";
 import { KindIcon } from "../sources/bits";
 import AddContextSheet, { type Draft } from "./AddContextSheet";
+import Sculptor from "@/components/Sculptor";
 
 // Context as source lanes. Auto-discovered refs carry a relevance bar + a "why" chip; pinned refs survive
 // rediscover. Everything here feeds generation via featurePrompt().
@@ -42,7 +43,7 @@ const displayTitle = (r: ContextRef) =>
   r.kind === "session" && /^\(no prompt\)$/.test(r.title.trim()) ? `session in ${r.excerpt.split(" · ")[0] || "a project"}` : r.title;
 const order = (a: ContextRef, b: ContextRef) => Number(!!a.auto) - Number(!!b.auto) || (b.score ?? 1) - (a.score ?? 1);
 
-export default function ContextTab({ feature, onChange }: { feature: Feature; onChange: (f: Feature) => void }) {
+export default function ContextTab({ feature, onChange }: { feature: FeatureView; onChange: (f: FeatureView) => void }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // latest feature, so rapid-fire optimistic edits don't clobber each other
@@ -52,7 +53,7 @@ export default function ContextTab({ feature, onChange }: { feature: Feature; on
   }, [feature]);
 
   const set = useCallback(
-    (patch: Partial<Feature>) => {
+    (patch: Partial<FeatureView>) => {
       const next = { ...latest.current, ...patch };
       latest.current = next;
       onChange(next);
@@ -65,7 +66,7 @@ export default function ContextTab({ feature, onChange }: { feature: Feature; on
   };
 
   // server echo: take only context (other tabs may hold optimistic edits)
-  const echo = useCallback((server: Feature) => set({ context: server.context }), [set]);
+  const echo = useCallback((server: FeatureView) => set({ context: server.context }), [set]);
 
   const ops = useCallback(
     async (list: ContextOp[]) => {
@@ -75,7 +76,7 @@ export default function ContextTab({ feature, onChange }: { feature: Feature; on
         body: JSON.stringify({ ops: list }),
       });
       if (!res.ok) throw new Error(String(res.status));
-      const out = (await res.json()) as { feature: Feature };
+      const out = (await res.json()) as { feature: FeatureView };
       if (out.feature) echo(out.feature);
     },
     [feature.id, echo],
@@ -94,7 +95,7 @@ export default function ContextTab({ feature, onChange }: { feature: Feature; on
           body: JSON.stringify({ ...ref, ...extra }),
         });
         if (!res.ok) throw new Error();
-        const server = (await res.json()) as Feature;
+        const server = (await res.json()) as FeatureView;
         const echoed = server.context.find((c) => c.id === ref.id);
         // merge just this ref, keeping other optimistic refs in flight
         set({ context: latest.current.context.map((c) => (c.id === ref.id && echoed ? echoed : c)) });
@@ -148,7 +149,7 @@ export default function ContextTab({ feature, onChange }: { feature: Feature; on
         body: JSON.stringify({ kinds: ["context"] }),
       });
       if (!res.ok) throw new Error();
-      const server = (await res.json()) as Feature;
+      const server = (await res.json()) as FeatureView;
       set({ jobs: server.jobs }); // the workspace polls from here
     } catch {
       set({ jobs: latest.current.jobs?.filter((j) => j.kind !== "context") });
@@ -191,8 +192,15 @@ export default function ContextTab({ feature, onChange }: { feature: Feature; on
         )}
       </AnimatePresence>
 
-      {ctx.length === 0 && !running ? (
-        <Empty searched={!!feature.discovery} onDiscover={rediscover} onAdd={() => setOpen(true)} />
+      {running && ctx.length === 0 && (
+        <div className="mb-6 flex justify-center">
+          <Sculptor label="searching your sources" startedAt={job?.startedAt} />
+        </div>
+      )}
+
+      {/* first search: the sculptor alone, no lane skeletons under it */}
+      {ctx.length === 0 ? (
+        !running && <Empty searched={!!feature.discovery} onDiscover={rediscover} onAdd={() => setOpen(true)} />
       ) : (
         <div className={clsx("grid gap-4 sm:grid-cols-2", lanes.length === 4 ? "lg:grid-cols-4" : "lg:grid-cols-3")}>
           {lanes.map((l, li) => (
@@ -218,7 +226,7 @@ export default function ContextTab({ feature, onChange }: { feature: Feature; on
 // ---------- header: count · sources · per-source status · rediscover ----------
 
 function Header({ feature, found, sources, running, onRediscover, onAdd }: {
-  feature: Feature;
+  feature: FeatureView;
   found: number;
   sources: number;
   running: boolean;

@@ -3,20 +3,18 @@
 //   story ops   → src/lib/stories.ts  applyStoryOp(feature, op)
 //   flow ops    → src/lib/flows.ts    applyFlowOp(feature, op)   (enforces MAX_FLOW_NODES)
 //   context ops → src/lib/autocontext.ts applyContextOp(feature, op)
-// apply* mutate the feature in place (call inside updateFeature) and return a ChangeNote for the chat.
+// apply* run on a piece view (src/lib/pieces.ts withPiece) and mutate it in place (call inside updateFeature) and return a ChangeNote for the chat.
 
 import type { AcceptanceDraft } from "./ops-drafts";
 import type { FlowLens, FlowNodeKind, Priority } from "./types";
 
 export type StoryOp =
-  | { op: "add_story"; role: string; want: string; soThat: string; priority?: Priority; sliceId?: string; acceptance?: AcceptanceDraft[] }
-  | { op: "update_story"; storyId: string; role?: string; want?: string; soThat?: string; priority?: Priority; sliceId?: string }
+  | { op: "add_story"; role: string; want: string; soThat: string; priority?: Priority; acceptance?: AcceptanceDraft[] }
+  | { op: "update_story"; storyId: string; role?: string; want?: string; soThat?: string; priority?: Priority }
   | { op: "remove_story"; storyId: string }
   | { op: "add_criterion"; storyId: string; criterion: AcceptanceDraft }
   | { op: "update_criterion"; storyId: string; criterionId: string; criterion: Partial<AcceptanceDraft> }
-  | { op: "remove_criterion"; storyId: string; criterionId: string }
-  | { op: "add_slice"; title: string; why: string; after?: string }
-  | { op: "rename_slice"; sliceId: string; title: string };
+  | { op: "remove_criterion"; storyId: string; criterionId: string };
 
 export type FlowOp =
   | { op: "rename_node"; setId: string; chartId: string; nodeId: string; label: string }
@@ -41,9 +39,10 @@ export type FeatureOp = StoryOp | FlowOp | ContextOp | { op: "update_brief"; bri
 // What the chat shows as a compact change card ("+ story", "~ node", "− edge case").
 export interface ChangeNote {
   sign: "+" | "~" | "−";
-  what: "story" | "criterion" | "slice" | "node" | "edge" | "edge case" | "chart" | "flow set" | "context" | "brief" | "title";
+  what: "story" | "criterion" | "piece" | "node" | "edge" | "edge case" | "chart" | "flow set" | "context" | "brief" | "title";
   label: string; // <= 6 words
   tab: "stories" | "flows" | "context" | "overview";
   ref?: string; // id to highlight/scroll to
   scope?: string; // container of ref when ref ids aren't globally unique (flow node/edge ids are per chart → chart id)
+  piece?: string; // piece id the change landed in (feature-level changes: none)
 }

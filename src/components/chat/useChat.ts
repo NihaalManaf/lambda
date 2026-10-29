@@ -3,20 +3,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatEvent, ChatTurn } from "@/lib/chat";
 import type { ChangeNote } from "@/lib/ops";
-import type { Feature } from "@/lib/types";
+import type { FeatureView } from "@/lib/types";
 
 // One in-flight turn rendered optimistically on top of the persisted thread (feature.chat).
 export interface Pending {
   user: string;
   text: string;
   changes: ChangeNote[];
+  code: { question: string; text: string }[]; // ask_codebase answers in this turn
+  status?: string; // live trace line ("asking the code…"), cleared by the next text
   error?: string; // transport failure (server never persisted a reply)
   base: number; // thread length when sent: persisted turns past this belong to the pending turn
 }
 
-export const threadOf = (f: Feature): ChatTurn[] => f.chat ?? [];
+const pq = (p?: string) => (p ? `?piece=${encodeURIComponent(p)}` : "");
 
-export function useChat(feature: Feature, onChange: (f: Feature) => void) {
+export const threadOf = (f: FeatureView): ChatTurn[] => f.chat ?? [];
+
+// pieceId = the piece selected in the workspace (default: the view's piece)
+export function useChat(feature: FeatureView, onChange: (f: FeatureView) => void, pieceId?: string) {
   const [pending, setPending] = useState<Pending | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const fid = feature.id;
@@ -24,6 +29,8 @@ export function useChat(feature: Feature, onChange: (f: Feature) => void) {
   const threadLen = useRef(thread.length);
   threadLen.current = thread.length;
   const changeRef = useRef(onChange);
+  const pieceRef = useRef(pieceId ?? feature.pieceId);
+  pieceRef.current = pieceId ?? feature.pieceId;
   useEffect(() => {
     changeRef.current = onChange;
   });
@@ -37,10 +44,12 @@ export function useChat(feature: Feature, onChange: (f: Feature) => void) {
       const ac = new AbortController();
       abortRef.current = ac;
       const sentAt = threadLen.current;
-      setPending({ user: text, text: "", changes: [], base: sentAt });
+      setPending({ user: text, text: "", changes: [], code: [], base: sentAt });
       let finished = false;
       const handle = (e: ChatEvent) => {
-        if (e.type === "text") setPending((p) => p && { ...p, text: p.text + e.delta });
+        if (e.type === "text") setPending((p) => p && { ...p, text: p.text + e.delta, status: undefined });
+        else if (e.type === "status") setPending((p) => p && { ...p, status: e.text });
+        else if (e.type === "code") setPending((p) => p && { ...p, code: [...p.code, { question: e.question, text: e.text }], status: undefined });
         else if (e.type === "change") setPending((p) => p && { ...p, changes: [...p.changes, e.note] });
         else if (e.type === "feature") changeRef.current(e.feature);
         else if (e.type === "done" || e.type === "error") finished = true; // persisted turn carries any error
@@ -49,7 +58,7 @@ export function useChat(feature: Feature, onChange: (f: Feature) => void) {
         const res = await fetch(`/api/features/${fid}/chat`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ text }),
+          body: JSON.stringify({ text, pieceId: pieceRef.current || undefined }),
           signal: ac.signal,
         });
         if (!res.ok || !res.body) {
@@ -83,9 +92,9 @@ export function useChat(feature: Feature, onChange: (f: Feature) => void) {
           setPending(null);
           void (async () => {
             for (let i = 0; i < 40; i++) {
-              const f = (await fetch(`/api/features/${fid}`)
+              const f = (await fetch(`/api/features/${fid}${pq(pieceRef.current)}`)
                 .then((r) => (r.ok ? r.json() : null))
-                .catch(() => null)) as Feature | null;
+                .catch(() => null)) as FeatureView | null;
               const t = f ? threadOf(f) : [];
               if (f && t.length > sentAt + 1 && t[t.length - 1].role === "assistant") return changeRef.current(f);
               await new Promise((r) => setTimeout(r, Math.min(250 * (i + 1), 1500)));
@@ -103,23 +112,23 @@ export function useChat(feature: Feature, onChange: (f: Feature) => void) {
   const dismiss = useCallback(() => setPending(null), []);
 
   const clear = useCallback(async () => {
-    const res = await fetch(`/api/features/${fid}/chat`, { method: "DELETE" });
-    if (res.ok) changeRef.current((await res.json()) as Feature);
+    const res = await fetch(`/api/features/${fid}/chat${pq(pieceRef.current)}`, { method: "DELETE" });
+    if (res.ok) changeRef.current((await res.json()) as FeatureView);
   }, [fid]);
 
   const [undoError, setUndoError] = useState<string | null>(null);
   const undo = useCallback(async () => {
     setUndoError(null);
-    const res = await fetch(`/api/features/${fid}/chat/undo`, { method: "POST" }).catch(() => null);
+    const res = await fetch(`/api/features/${fid}/chat/undo${pq(pieceRef.current)}`, { method: "POST" }).catch(() => null);
     const body = await res?.json().catch(() => null);
-    if (res?.ok && body) changeRef.current(body as Feature);
+    if (res?.ok && body) changeRef.current(body as FeatureView);
     else setUndoError((body as { error?: string } | null)?.error ?? "couldn't undo");
   }, [fid]);
 
   return { thread, pending, busy: !!pending && !pending.error, send, stop, dismiss, clear, undo, undoError };
 }
 
-// Tell the workspace to show a ref. Workspace / tabs listen for this.
+// Tell the workspace to show a ref (and the piece it landed in). Workspace / tabs listen for this.
 export function focusRef(note: ChangeNote) {
-  window.dispatchEvent(new CustomEvent("lambda:focus", { detail: { tab: note.tab, ref: note.ref, scope: note.scope } }));
+  window.dispatchEvent(new CustomEvent("lambda:focus", { detail: { tab: note.tab, ref: note.ref, scope: note.scope, piece: note.piece } }));
 }

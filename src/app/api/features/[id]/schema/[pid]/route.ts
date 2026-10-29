@@ -11,7 +11,7 @@ type Ctx = { params: Promise<{ id: string; pid: string }> };
 export async function GET(_req: Request, { params }: Ctx) {
   const { id, pid } = await params;
   const f = getFeature(id);
-  const p = f?.schema?.find((x) => x.id === pid);
+  const p = f?.pieces.flatMap((x) => x.schema ?? []).find((x) => x.id === pid);
   if (!p) return NextResponse.json({ error: "not found" }, { status: 404 });
   try {
     const r = await current();

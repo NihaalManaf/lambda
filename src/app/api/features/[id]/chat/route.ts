@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { clearThread, runChat, threadOf, type ChatEvent } from "@/lib/chat";
+import { pieceIdFrom, pieceView } from "@/lib/pieces";
 import { getFeature } from "@/lib/store";
 
 export const runtime = "nodejs";
@@ -15,11 +16,12 @@ export async function GET(_: Request, { params }: Ctx) {
   return f ? NextResponse.json({ thread: threadOf(f) }) : NextResponse.json({ error: "not found" }, { status: 404 });
 }
 
-// POST {text} -> text/event-stream of ChatEvent ("data: {json}\n\n").
+// POST {text, pieceId?} (pieceId = the selected piece; default first) -> text/event-stream of ChatEvent ("data: {json}\n\n").
 export async function POST(req: Request, { params }: Ctx) {
   const fid = (await params).id;
   if (!getFeature(fid)) return NextResponse.json({ error: "not found" }, { status: 404 });
-  const body = (await req.json().catch(() => null)) as { text?: unknown } | null;
+  const body = (await req.json().catch(() => null)) as { text?: unknown; pieceId?: unknown } | null;
+  const pid = pieceIdFrom(req.url, body);
   const text = typeof body?.text === "string" ? body.text.trim().slice(0, 4000) : "";
   if (!text) return NextResponse.json({ error: "text required" }, { status: 400 });
   if (busy.has(fid)) return NextResponse.json({ error: "lambda is still answering" }, { status: 409 });
@@ -41,7 +43,7 @@ export async function POST(req: Request, { params }: Ctx) {
         }
       };
       try {
-        await runChat(fid, text, emit, abort.signal);
+        await runChat(fid, text, emit, abort.signal, pid);
       } catch (e) {
         emit({ type: "error", message: e instanceof Error ? e.message : String(e) });
       } finally {
@@ -68,10 +70,10 @@ export async function POST(req: Request, { params }: Ctx) {
   });
 }
 
-// DELETE -> fresh thread
-export async function DELETE(_: Request, { params }: Ctx) {
+// DELETE -> fresh thread (pieceView)
+export async function DELETE(req: Request, { params }: Ctx) {
   const fid = (await params).id;
   if (!getFeature(fid)) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (busy.has(fid)) return NextResponse.json({ error: "lambda is still answering" }, { status: 409 });
-  return NextResponse.json(await clearThread(fid));
+  return NextResponse.json(pieceView(await clearThread(fid), pieceIdFrom(req.url)));
 }

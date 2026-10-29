@@ -4,7 +4,7 @@ import path from "node:path";
 import { z } from "zod";
 import { featurePrompt, generate } from "./llm";
 import { SHOTS_DIR, id } from "./store";
-import type { Annotation, Box, Feature, Mockup } from "./types";
+import type { Annotation, Box, FeatureView, Mockup } from "./types";
 
 // Plan marker annotations over a real screenshot. The model points at numbered DOM boxes;
 // we turn idx -> pixel boxes here. Raw model coordinates are a last resort.
@@ -43,6 +43,7 @@ Not a redesign. Show only WHERE things change:
 - restyle: same thing, different look
 - note: a question / edge case pinned to an element
 Point at the numbered boxes drawn on the image. Labels <= 6 words. Never annotate unrelated areas.
+Never quote data values from the page (names, emails, numbers) in labels or details.
 `.trim();
 
 export type SketchMockup = Mockup & { intent?: string; thumb?: string };
@@ -60,7 +61,13 @@ function iou(a: Box, b: Box) {
 const isDup = (x: Annotation, y: Annotation) =>
   x.kind === y.kind && ((norm(x.label) === norm(y.label) && iou(x.box, y.box) > 0) || iou(x.box, y.box) > 0.6);
 
-export async function planSketch(feature: Feature, mockup: Mockup, intent: string): Promise<Annotation[]> {
+// opts.context: facts the marker must not guess (route status, signed-out capture, new-screen rules).
+export async function planSketch(
+  feature: FeatureView,
+  mockup: Mockup,
+  intent: string,
+  opts: { signal?: AbortSignal; context?: string } = {},
+): Promise<Annotation[]> {
   const els = mockup.elements;
   const list = els
     .map((e) => `${e.idx} ${e.tag}${e.role ? `[${e.role}]` : ""} "${e.text}" @${e.x},${e.y} ${e.w}x${e.h}`)
@@ -69,7 +76,7 @@ export async function planSketch(feature: Feature, mockup: Mockup, intent: strin
   const tiles = await markedTiles(mockup);
   const prompt = `${featurePrompt(feature)}
 
-what changes on this screen: ${intent || "(infer from the feature)"}
+what changes on this screen: ${intent || "(infer from the feature)"}${opts.context ? `\n${opts.context}` : ""}
 
 page: ${mockup.title} — ${mockup.url}
 screenshot: ${mockup.width}x${mockup.height}px, sent as ${tiles.length} vertical tile(s) top→bottom${
@@ -85,6 +92,7 @@ ${list || "(none found — use box)"}`;
     prompt,
     images: tiles.map(({ mediaType, base64 }) => ({ mediaType, base64 })),
     effort: "medium",
+    signal: opts.signal,
   });
 
   const byIdx = new Map(els.map((e) => [e.idx, e]));

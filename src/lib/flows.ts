@@ -7,7 +7,7 @@ import { id, now } from "./store";
 import {
   MAX_FLOW_NODES,
   type EdgeCase,
-  type Feature,
+  type FeatureView,
   type FlowEdge,
   type FlowLens,
   type FlowNode,
@@ -86,7 +86,7 @@ export function sanitizeChart(raw: z.infer<typeof Out>["charts"][number], lens: 
   return { id: id("fc"), title: words(raw.title, 5), summary: words(raw.summary, 12), nodes, edges, edgeCases };
 }
 
-export async function generateFlows(feature: Feature, lens: FlowLens, focus?: string, signal?: AbortSignal): Promise<FlowchartSet> {
+export async function generateFlows(feature: FeatureView, lens: FlowLens, focus?: string, signal?: AbortSignal): Promise<FlowchartSet> {
   const existing = feature.flowcharts.map((s) => `- ${s.lens}: ${s.charts.map((c) => c.title).join(", ")}`).join("\n");
   const prompt = [
     featurePrompt(feature),
@@ -117,7 +117,7 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
 // LLM rewrites ONE chart from a one-line instruction. Same rules + caps; decisions carry over by node label.
 export async function refineChart(
-  feature: Feature,
+  feature: FeatureView,
   set: FlowchartSet,
   chart: Flowchart,
   instruction: string,
@@ -179,7 +179,7 @@ export function undoDepth(featureId: string, chartId: string) {
 }
 
 // Mutates in place (call inside updateFeature). Restores the chart as it was before its last edit.
-export function undoChart(feature: Feature, setId: string, chartId: string): ChangeNote {
+export function undoChart(feature: FeatureView, setId: string, chartId: string): ChangeNote {
   const key = histKey(feature.id, chartId);
   const stack = history.get(key);
   const v = stack?.pop();
@@ -200,7 +200,7 @@ export function undoChart(feature: Feature, setId: string, chartId: string): Cha
 // Applies one FlowOp to the feature in place (call inside updateFeature). Graph edits are sync;
 // refine_chart + draw_lens call the model. Every chart stays <= MAX_FLOW_NODES (split otherwise).
 // Prefer prepareFlowOp for the slow ops: it keeps the model call outside the store lock.
-export function applyFlowOp(feature: Feature, op: FlowOp): ChangeNote | Promise<ChangeNote> {
+export function applyFlowOp(feature: FeatureView, op: FlowOp): ChangeNote | Promise<ChangeNote> {
   if (isGraphOp(op)) {
     const r = applyGraphOp(feature, op);
     remember(feature.id, { before: r.before, after: r.after });
@@ -211,7 +211,7 @@ export function applyFlowOp(feature: Feature, op: FlowOp): ChangeNote | Promise<
   return prepareFlowOp(feature, op).then((commit) => commit(feature));
 }
 
-function locateChart(feature: Feature, setId: string, chartId: string) {
+function locateChart(feature: FeatureView, setId: string, chartId: string) {
   const c = feature.flowcharts.find((s) => s.id === setId)?.charts.find((x) => x.id === chartId);
   if (!c) return undefined;
   return {
@@ -225,7 +225,7 @@ export const isSlowFlowOp = (op: { op: string }): op is SlowFlowOp => op.op === 
 
 // Two phases so the store lock is never held during a model call:
 // prepare (model call, against a snapshot, outside the lock) → commit (in place, inside updateFeature).
-export async function prepareFlowOp(snapshot: Feature, op: SlowFlowOp, signal?: AbortSignal): Promise<(f: Feature) => ChangeNote> {
+export async function prepareFlowOp(snapshot: FeatureView, op: SlowFlowOp, signal?: AbortSignal): Promise<(f: FeatureView) => ChangeNote> {
   if (op.op === "refine_chart") {
     if (!op.instruction.trim()) throw new Error("say what's wrong");
     const { set, chart } = locate(snapshot, op.setId, op.chartId);

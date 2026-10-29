@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { allRuns } from "@/lib/pieces";
 import { listFeatures } from "@/lib/store";
 import { TERMINAL, type Run } from "@/lib/runs";
 import { reapIfLost } from "@/lib/verify";
@@ -7,7 +8,7 @@ import { reapIfLost } from "@/lib/verify";
 export async function GET() {
   const active = [];
   for (const f of listFeatures()) {
-    for (const r of f.runs as Run[]) {
+    for (const r of allRuns(f) as Run[]) {
       if (TERMINAL.has(r.status)) continue;
       const run = await reapIfLost(f.id, r);
       if (TERMINAL.has(run.status)) continue;

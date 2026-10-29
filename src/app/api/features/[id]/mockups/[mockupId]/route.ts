@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { removeShot } from "@/lib/capture";
+import { pieceOfMockup, pieceView } from "@/lib/pieces";
 import { getFeature, id as newId, updateFeature } from "@/lib/store";
 import type { Annotation } from "@/lib/types";
 
@@ -18,17 +19,19 @@ const AnnZ = z.object({
 });
 const Body = z.object({ annotations: z.array(AnnZ).max(60) });
 
-// PATCH {annotations} -> Feature (manual edits from the sketch canvas)
+// PATCH {annotations} -> pieceView of the mockup's piece (manual edits from the sketch canvas)
 export async function PATCH(req: Request, { params }: Ctx) {
   const { id, mockupId } = await params;
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "bad annotations" }, { status: 400 });
-  if (!getFeature(id)?.mockups.some((m) => m.id === mockupId))
-    return NextResponse.json({ error: "not found" }, { status: 404 });
+  const f0 = getFeature(id);
+  const pid = f0 && pieceOfMockup(f0, mockupId)?.id;
+  if (!pid) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const f = await updateFeature(id, (f) => {
-    const m = f.mockups.find((m) => m.id === mockupId);
+    const m = pieceOfMockup(f, mockupId)?.mockups.find((m) => m.id === mockupId);
     if (!m) return;
+    if (m.auto) m.edited = true; // a re-run of the auto sketch keeps hand-edited marks
     const fit = (b: z.infer<typeof BoxZ>) => {
       const x = Math.max(0, Math.min(Math.round(b.x), m.width - 10));
       const y = Math.max(0, Math.min(Math.round(b.y), m.height - 10));
@@ -46,17 +49,21 @@ export async function PATCH(req: Request, { params }: Ctx) {
       }),
     );
   });
-  return NextResponse.json(f);
+  return NextResponse.json(pieceView(f, pid));
 }
 
 export async function DELETE(_: Request, { params }: Ctx) {
   const { id, mockupId } = await params;
   if (!getFeature(id)) return NextResponse.json({ error: "not found" }, { status: 404 });
   let shot: string | undefined;
+  let pid: string | undefined;
   const f = await updateFeature(id, (f) => {
-    shot = f.mockups.find((m) => m.id === mockupId)?.shot;
-    f.mockups = f.mockups.filter((m) => m.id !== mockupId);
+    const p = pieceOfMockup(f, mockupId);
+    if (!p) return;
+    pid = p.id;
+    shot = p.mockups.find((m) => m.id === mockupId)?.shot;
+    p.mockups = p.mockups.filter((m) => m.id !== mockupId);
   });
   if (shot) removeShot(shot);
-  return NextResponse.json(f);
+  return NextResponse.json(pieceView(f, pid));
 }

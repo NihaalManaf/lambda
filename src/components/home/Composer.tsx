@@ -67,12 +67,12 @@ export function Composer() {
       <textarea
         value={brief}
         onChange={(e) => setBrief(e.target.value)}
-        placeholder="short brief — who, why, rough shape"
+        placeholder="optional notes — lambda asks the rest"
         rows={2}
         className="mt-3 w-full resize-none bg-transparent text-[15px] text-ink-2 outline-none placeholder:text-grey/60"
       />
       <div className="mt-3 flex items-center justify-between border-t border-line pt-4">
-        <span className="font-mono text-[11px] text-grey">⌘ ↵</span>
+        <span className="font-mono text-[11px] text-grey">↵ on the name · ⌘ ↵ anywhere</span>
         <div className="flex items-center gap-3">
           <AnimatePresence>
             {err && (
@@ -87,7 +87,7 @@ export function Composer() {
             )}
           </AnimatePresence>
           <button type="submit" className="btn btn-primary" disabled={!title.trim() || busy}>
-            {busy ? "opening…" : "shape it →"}
+            {busy ? "opening…" : "talk it through →"}
           </button>
         </div>
       </div>

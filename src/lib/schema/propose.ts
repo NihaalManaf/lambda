@@ -4,7 +4,7 @@ import path from "node:path";
 import { z } from "zod";
 import { blanksToNull, featurePrompt, generate, type Nulls } from "../llm";
 import { getSettings, id, now } from "../store";
-import type { Feature } from "../types";
+import type { FeatureView } from "../types";
 import { bare, qualify } from "./apply";
 import { enumOf } from "./diff";
 import { opsToSql } from "./emit";
@@ -149,7 +149,7 @@ export function toOp(r: RawOp): SchemaOp | null {
   return null;
 }
 
-export async function proposeFromPrompt(feature: Feature, text: string): Promise<SchemaProposal> {
+export async function proposeFromPrompt(feature: FeatureView, text: string): Promise<SchemaProposal> {
   const r = await current();
   const stories = feature.stories.map((s) => `${s.want} ${s.soThat}`).join("\n");
   const ids = relevantTables(r.head, `${feature.title}\n${feature.brief}\n${stories}\n${text}`);

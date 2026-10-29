@@ -2,22 +2,23 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import type { Feature, Risk } from "@/lib/types";
+import type { FeatureView, Risk } from "@/lib/types";
 import type { QueueGraph, QueueProposal } from "@/lib/queues/types";
 import { notify } from "@/lib/desktop";
 import { Icon } from "@/components/viz/icons";
 import DiffLegend from "@/components/viz/DiffLegend";
 import RiskList from "@/components/viz/RiskList";
 import ShowSource from "@/components/viz/ShowSource";
+import Sculptor from "@/components/Sculptor";
 import QueueCanvas from "./QueueCanvas";
 import QueueComposer from "./QueueComposer";
 import { QCtx } from "./qNodes";
 
-// Feature tab: propose a queue change (prompt or repo diff), see it as a diff over the touched domains.
+// FeatureView tab: propose a queue change (prompt or repo diff), see it as a diff over the touched domains.
 
 const spring = { type: "spring", stiffness: 420, damping: 36 } as const;
 
-export default function QueuesTab({ feature, onChange }: { feature: Feature; onChange: (f: Feature) => void }) {
+export default function QueuesTab({ feature, onChange }: { feature: FeatureView; onChange: (f: FeatureView) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const base = `/api/features/${feature.id}/queues`;
@@ -27,7 +28,7 @@ export default function QueuesTab({ feature, onChange }: { feature: Feature; onC
     const res = await fetch(init.url ?? base, { headers: { "content-type": "application/json" }, ...init });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error ?? res.statusText);
-    return body as Feature;
+    return body as FeatureView;
   }
 
   async function propose(body: { source: "llm"; prompt: string } | { source: "git" }) {
@@ -35,7 +36,7 @@ export default function QueuesTab({ feature, onChange }: { feature: Feature; onC
     setBusy(true);
     setError(null);
     try {
-      const f = await call({ method: "POST", body: JSON.stringify(body) });
+      const f = await call({ method: "POST", body: JSON.stringify({ ...body, pieceId: feature.pieceId || undefined }) });
       onChange(f);
       notify("queue change drawn", f.title);
     } catch (e) {
@@ -76,7 +77,7 @@ export default function QueuesTab({ feature, onChange }: { feature: Feature; onC
       </AnimatePresence>
 
       <AnimatePresence initial={false} mode="popLayout">
-        {busy && <Skeleton key="skeleton" />}
+        {busy && <Mapping key="mapping" />}
         {proposals.map((p) => (
           <ProposalCard key={p.id} fid={feature.id} proposal={p} onDelete={() => remove(p.id)} />
         ))}
@@ -183,19 +184,17 @@ function ProposalCard({ fid, proposal, onDelete }: { fid: string; proposal: Queu
   );
 }
 
-function Skeleton() {
+function Mapping() {
   return (
-    <motion.section layout initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={spring}>
-      <div className="card overflow-hidden">
-        <div className="border-b border-line px-5 py-3">
-          <div className="shimmer h-7 w-56 rounded-lg" />
-        </div>
-        <div className="flex items-center justify-center gap-8 py-14">
-          {[44, 150, 120, 160].map((w, i) => (
-            <div key={i} className={i < 1 || i === 2 ? "shimmer h-10 rounded-full" : "shimmer h-11 rounded-xl"} style={{ width: w }} />
-          ))}
-        </div>
-      </div>
+    <motion.section
+      layout
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0 }}
+      transition={spring}
+      className="flex justify-center py-8"
+    >
+      <Sculptor label="mapping the queues" size="sm" />
     </motion.section>
   );
 }

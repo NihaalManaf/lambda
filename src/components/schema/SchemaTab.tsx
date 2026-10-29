@@ -3,23 +3,24 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
-import type { Feature, IconName, Risk } from "@/lib/types";
+import type { FeatureView, IconName, Risk } from "@/lib/types";
 import type { MigrationView, SchemaProposal } from "@/lib/schema/types";
 import { notify } from "@/lib/desktop";
 import { Icon } from "@/components/viz/icons";
 import DiffLegend from "@/components/viz/DiffLegend";
 import RiskList from "@/components/viz/RiskList";
 import ShowSource from "@/components/viz/ShowSource";
+import Sculptor from "@/components/Sculptor";
 import Erd from "./Erd";
 import ProposalComposer, { type ProposalBody } from "./ProposalComposer";
 
-// Feature tab: describe a schema change (or hand over SQL / repo files) → see it drawn on the live schema.
+// FeatureView tab: describe a schema change (or hand over SQL / repo files) → see it drawn on the live schema.
 
 const spring = { type: "spring", stiffness: 420, damping: 36 } as const;
 const SOURCE: Record<SchemaProposal["source"], IconName> = { llm: "bolt", sql: "file", git: "split" };
 type View = MigrationView & { stale: boolean };
 
-export default function SchemaTab({ feature, onChange }: { feature: Feature; onChange: (f: Feature) => void }) {
+export default function SchemaTab({ feature, onChange }: { feature: FeatureView; onChange: (f: FeatureView) => void }) {
   const [pending, setPending] = useState<ProposalBody | null>(null);
   const [error, setError] = useState<string | null>(null);
   const base = `/api/features/${feature.id}/schema`;
@@ -29,7 +30,7 @@ export default function SchemaTab({ feature, onChange }: { feature: Feature; onC
     const res = await fetch(init.url ?? base, { headers: { "content-type": "application/json" }, ...init });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error ?? res.statusText);
-    return body as Feature;
+    return body as FeatureView;
   }
 
   async function send(b: ProposalBody) {
@@ -37,7 +38,7 @@ export default function SchemaTab({ feature, onChange }: { feature: Feature; onC
     setPending(b);
     setError(null);
     try {
-      const f = await call({ method: "POST", body: JSON.stringify(b) });
+      const f = await call({ method: "POST", body: JSON.stringify({ ...b, pieceId: feature.pieceId || undefined }) });
       onChange(f);
       notify("schema drawn", f.schema?.at(-1)?.title ?? f.title);
     } catch (e) {
@@ -77,7 +78,7 @@ export default function SchemaTab({ feature, onChange }: { feature: Feature; onC
       </AnimatePresence>
 
       <AnimatePresence initial={false} mode="popLayout">
-        {pending && <Skeleton key="pending" body={pending} />}
+        {pending && <Drafting key="pending" />}
         {proposals.map((p) => (
           <ProposalCard key={p.id} featureId={feature.id} p={p} onDelete={() => remove(p.id)} />
         ))}
@@ -180,7 +181,7 @@ function ProposalCard({ featureId, p, onDelete }: { featureId: string; p: Schema
   );
 }
 
-function Skeleton({ body }: { body: ProposalBody }) {
+function Drafting() {
   return (
     <motion.section
       layout
@@ -188,31 +189,9 @@ function Skeleton({ body }: { body: ProposalBody }) {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0 }}
       transition={spring}
-      className="card overflow-hidden"
+      className="flex justify-center py-8"
     >
-      <div className="flex items-center gap-3 border-b border-line px-5 py-3">
-        <span className="grid size-7 place-items-center rounded-full bg-lilac-soft">
-          <Icon name={SOURCE[body.source]} size={14} />
-        </span>
-        <div className="shimmer h-6 w-56 rounded-lg" />
-      </div>
-      <div className="flex">
-        <div className="flex flex-1 items-center justify-center gap-16 bg-paper py-10">
-          {[0, 1].map((i) => (
-            <div key={i} className="w-48 overflow-hidden rounded-xl border border-line">
-              <div className="shimmer h-8" />
-              {[0, 1, 2, 3].map((j) => (
-                <div key={j} className="mx-3 my-2 h-3 rounded-full bg-paper-2" />
-              ))}
-            </div>
-          ))}
-        </div>
-        <div className="hidden w-72 space-y-3 border-l border-line p-4 md:block">
-          {[0, 1, 2].map((j) => (
-            <div key={j} className="shimmer h-5 rounded-md" />
-          ))}
-        </div>
-      </div>
+      <Sculptor label="drafting the schema" size="sm" />
     </motion.section>
   );
 }

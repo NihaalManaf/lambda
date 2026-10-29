@@ -5,7 +5,9 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { getSettings, id, now, SHOTS_DIR, updateFeature } from "./store";
 import { parseStreamLine, parseVerdict, redactor, RUN_ID, SHOT_NAME, short, type Run, type Verdict } from "./runs";
 import { toolEnv } from "./sources/cli";
+import { pieceOfRun, pieceOfStory } from "./pieces";
 import type { Feature, Story, TestAccount } from "./types";
+import { wrongApp } from "./appowner";
 
 // Browser verification: headless Claude Code CLI + Playwright MCP, one run per story.
 
@@ -198,7 +200,7 @@ function cliArgs(runId: string, base: string, account?: TestAccount): string[] {
 
 async function patchRun(featureId: string, runId: string, mutate: (r: Run) => void) {
   return updateFeature(featureId, (f) => {
-    const r = f.runs.find((x) => x.id === runId) as Run | undefined;
+    const r = pieceOfRun(f, runId)?.runs.find((x) => x.id === runId) as Run | undefined;
     if (r) mutate(r);
   });
 }
@@ -209,11 +211,15 @@ export async function startRun(
   accountId?: string,
 ): Promise<{ feature: Feature; runId: string }> {
   const settings = getSettings();
-  const story = feature.stories.find((s) => s.id === storyId);
+  const story = pieceOfStory(feature, storyId)?.stories.find((s) => s.id === storyId);
   if (!story) throw new Error("story not found");
   if (!story.acceptance.length) throw new Error("story has no acceptance criteria");
   const account = accountId ? settings.accounts.find((a) => a.id === accountId) : undefined;
   if (accountId && !account) throw new Error("test account not found");
+  // a paid browser run against some other repo's dev server is worse than no run
+  const base = settings.frontendUrl;
+  const other = await wrongApp(base, settings.repoPath);
+  if (other) throw new Error(other);
   const key = `${feature.id}:${storyId}`;
   if (starting.has(key) || [...live.values()].some((l) => l.featureId === feature.id && l.storyId === storyId))
     throw new Error("already running for this story");
@@ -223,7 +229,9 @@ export async function startRun(
   const run: Run = { id: runId, storyId, accountId, status: "queued", startedAt: now(), log: ["queued"], shots: [] };
   try {
     await updateFeature(feature.id, (f) => {
-      f.runs = [run, ...f.runs].slice(0, MAX_RUNS);
+      const p = pieceOfStory(f, storyId);
+      if (!p) throw new Error("story not found");
+      p.runs = [run, ...p.runs].slice(0, MAX_RUNS);
     });
   } catch (e) {
     starting.delete(key);
@@ -238,11 +246,11 @@ export async function startRun(
   delete env.CLAUDECODE;
   delete env.CLAUDE_CODE_ENTRYPOINT;
 
-  const child = spawn("claude", cliArgs(runId, settings.frontendUrl, account), { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn("claude", cliArgs(runId, base, account), { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
   live.set(runId, { child, featureId: feature.id, storyId });
   starting.delete(key);
   child.stdin?.on("error", () => {});
-  child.stdin?.end(buildPrompt(story, settings.frontendUrl, account, runDir(runId)));
+  child.stdin?.end(buildPrompt(story, base, account, runDir(runId)));
 
   // buffered log, flushed ~1/s
   let pending: string[] = [];
@@ -309,7 +317,7 @@ export async function startRun(
           ? "no verdict line from agent"
           : `agent stopped (exit ${code ?? "killed"})`;
     await updateFeature(feature.id, (f) => {
-      const r = f.runs.find((x) => x.id === runId) as Run | undefined;
+      const r = pieceOfRun(f, runId)?.runs.find((x) => x.id === runId) as Run | undefined;
       if (r) {
         r.status = status;
         r.finishedAt = now();
@@ -317,7 +325,7 @@ export async function startRun(
         r.failures = v?.failures.map(redact) ?? [];
         r.shots = listShots(runId);
       }
-      const s = f.stories.find((x) => x.id === storyId);
+      const s = pieceOfStory(f, storyId)?.stories.find((x) => x.id === storyId);
       if (s && v && !cancelled) s.status = v.passed ? "passing" : "failing";
     }).catch(() => fs.rmSync(runDir(runId), { recursive: true, force: true })); // feature deleted mid-run
   };
@@ -358,5 +366,5 @@ export async function reapIfLost(featureId: string, run: Run): Promise<Run> {
     r.finishedAt = now();
     r.summary = "lost — server restarted mid-run";
   });
-  return (f.runs.find((r) => r.id === run.id) as Run) ?? run;
+  return (pieceOfRun(f, run.id)?.runs.find((r) => r.id === run.id) as Run) ?? run;
 }

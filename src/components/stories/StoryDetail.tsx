@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import clsx from "clsx";
 import type { StoryOp } from "@/lib/ops";
-import type { Acceptance, Slice, Story, VerificationRun } from "@/lib/types";
+import type { Acceptance, Piece, Story, VerificationRun } from "@/lib/types";
 import { CriterionForm, GWT } from "./Compose";
 import { Icon, Inline, LIVE, LiveIcon, Meter, RoleChip, ago, asA, type Live } from "./bits";
 import { tileSpring } from "./StoryTile";
@@ -15,12 +15,13 @@ export default function StoryDetail({
   story,
   layoutKey,
   keyOf,
-  slices,
   hidden,
   run,
   live,
   starting,
   onOp,
+  pieces = [],
+  onMove,
   onDelete,
   onDeleteCriterion,
   onRun,
@@ -30,12 +31,13 @@ export default function StoryDetail({
   story: Story;
   layoutKey: string;
   keyOf: (id: string) => string;
-  slices: Slice[];
   hidden: Set<string>;
   run?: VerificationRun;
   live: Live;
   starting: boolean;
   onOp: (op: StoryOp) => void;
+  pieces?: Pick<Piece, "id" | "title" | "order">[]; // the feature's other pieces (move targets)
+  onMove?: (pieceId: string) => void;
   onDelete: () => void;
   onDeleteCriterion: (a: Acceptance) => void;
   onRun: () => void;
@@ -107,25 +109,25 @@ export default function StoryDetail({
           {/* meta */}
           <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-3 border-y border-line py-3">
             <Meter p={story.priority} onPick={(priority) => upd({ priority })} big />
-            {slices.length > 1 && (
-              <div className="flex items-center gap-1.5">
-                <span className="eyebrow">slice</span>
-                {slices.map((sl, i) => (
-                  <button
-                    key={sl.id}
-                    onClick={() => upd({ sliceId: sl.id })}
-                    className={clsx(
-                      "grid h-6 min-w-6 place-items-center rounded-full border px-1.5 font-mono text-[11px] transition-colors duration-150",
-                      story.sliceId === sl.id ? "border-ink bg-ink text-paper" : "border-line-2 text-grey hover:border-ink hover:text-ink",
-                    )}
-                    title={sl.title}
-                  >
-                    {i + 1}
-                  </button>
-                ))}
-              </div>
+            {onMove && pieces.length > 0 && (
+              <label className="ml-auto inline-flex items-center gap-1 text-xs text-grey transition-colors focus-within:text-ink hover:text-ink">
+                <span aria-hidden>→</span>
+                <select
+                  value=""
+                  onChange={(e) => e.target.value && onMove(e.target.value)}
+                  aria-label="move to piece"
+                  className="cursor-pointer appearance-none bg-transparent pr-1 outline-none"
+                >
+                  <option value="">move to piece</option>
+                  {pieces.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.order} · {p.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
             )}
-            <button onClick={onDelete} className="ml-auto inline-flex items-center gap-1 text-xs text-grey transition-colors hover:text-bad">
+            <button onClick={onDelete} className={clsx(onMove && pieces.length > 0 ? "ml-3" : "ml-auto", "inline-flex items-center gap-1 text-xs text-grey transition-colors hover:text-bad")}>
               <Icon name="trash" size={13} /> delete
             </button>
           </div>

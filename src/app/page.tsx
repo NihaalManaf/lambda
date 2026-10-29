@@ -1,8 +1,7 @@
-import { listFeatures } from "@/lib/store";
 import { Home } from "@/components/home/Home";
 
 export const dynamic = "force-dynamic";
 
 export default function Page() {
-  return <Home features={listFeatures()} />;
+  return <Home />;
 }
