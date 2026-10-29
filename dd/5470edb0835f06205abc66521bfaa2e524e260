@@ -1,0 +1,20 @@
+src/components/askbar/Thread.tsx
+  s_74b7625d8de655::t_34829ad78c376e 426
+  s_74b7625d8de655::t_09d7a96328d2e1 345-350,355,362-369,401,403-405,408,413-414,420-421,423-425,427-430
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dd5470edb0835f06205abc66521bfaa2e524e260",
+  "prompts": {},
+  "sessions": {
+    "s_74b7625d8de655": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "31c5fb27-e3cc-44bd-9809-9322936c1e00",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Nihaal Manaf <nihaalmanaf@gmail.com>"
+    }
+  }
+}
