@@ -8,6 +8,7 @@ import type { ChatTurn } from "@/lib/chat";
 import type { ChangeNote } from "@/lib/ops";
 import type { Pending } from "@/components/chat/useChat";
 import type { FeatureMode } from "@/lib/types";
+import { focusNote, hidePartial, parse, type Cite } from "@/components/cite/cite";
 
 // The ONE feature thread: intake conversation (muted) → "shaping →" divider where the brief landed →
 // edit turns with change cards, and answers from the codebase session.
@@ -135,7 +136,7 @@ export default function Thread({
           <Fragment key={t.id}>
             <li className={clsx(t.source === "intake" && "opacity-60")}>
               {t.role === "user" ? (
-                <UserBubble text={answers.compact.get(t.id) ?? t.text} muted={t.source === "intake"} />
+                <UserBubble text={answers.compact.get(t.id) ?? t.text} muted={t.source === "intake"} onChip={onChip} />
               ) : t.source === "code" ? (
                 <CodeAnswer text={t.text} />
               ) : t.source === "intake" ? (
@@ -159,7 +160,7 @@ export default function Thread({
         {pending && (
           <>
             <li>
-              <UserBubble text={pending.user} fresh />
+              <UserBubble text={pending.user} fresh onChip={onChip} />
             </li>
             {pending.code.map((c, i) => (
               <li key={`code-${i}`}>
@@ -212,7 +213,31 @@ function ShapingDivider({ mode }: { mode: FeatureMode }) {
   );
 }
 
-function UserBubble({ text, fresh, muted }: { text: string; fresh?: boolean; muted?: boolean }) {
+const CITE_GLYPH = { story: "❝", chart: "⇢", node: "◇", case: "!", table: "▦", mark: "✎" } as const;
+
+// A cited object (yours via ⌥-click, or one lambda names in its answer): a chip that opens it in the workspace.
+function CiteChip({ c, onChip }: { c: Cite; onChip?: (n: ChangeNote) => void }) {
+  const note = focusNote(c);
+  return (
+    <button
+      type="button"
+      disabled={!note || !onChip}
+      onClick={() => note && onChip?.(note)}
+      title={note ? `open ${note.what}: ${c.label}` : `${c.kind} ${c.id}`}
+      className="mx-0.5 inline-flex max-w-full items-baseline gap-1 rounded-full border border-lilac/60 bg-lilac-soft px-2 py-px align-baseline text-[0.93em] leading-snug text-ink transition-colors enabled:hover:border-lilac disabled:cursor-default"
+    >
+      <span aria-hidden className="text-[0.85em] text-grey">{CITE_GLYPH[c.kind]}</span>
+      <span className="truncate">{c.label}</span>
+    </button>
+  );
+}
+
+// text with its cite tokens as chips; the plain runs go through `fmt` (inline markdown for lambda's words)
+function withCites(text: string, onChip?: (n: ChangeNote) => void, fmt: (s: string) => React.ReactNode = (s) => s) {
+  return parse(text).map((s, i) => (typeof s === "string" ? <Fragment key={i}>{fmt(s)}</Fragment> : <CiteChip key={i} c={s} onChip={onChip} />));
+}
+
+function UserBubble({ text, fresh, muted, onChip }: { text: string; fresh?: boolean; muted?: boolean; onChip?: (n: ChangeNote) => void }) {
   return (
     <motion.div
       className={clsx(
@@ -223,7 +248,8 @@ function UserBubble({ text, fresh, muted }: { text: string; fresh?: boolean; mut
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.18, ease: EASE }}
     >
-      {text}
+      {/* cited objects (⌥-click in a visualization) render as chips that jump back to them */}
+      {withCites(text, onChip)}
     </motion.div>
   );
 }
@@ -341,7 +367,7 @@ function Reply({
       {undoError && <span className="font-mono text-[11px] text-bad">{undoError}</span>}
       {(text || (streaming && !thinking && !status)) && (
         <p className="whitespace-pre-wrap break-words text-[14px] leading-relaxed text-ink-2">
-          {inline(text)}
+          {withCites(streaming ? hidePartial(text) : text, onChip, inline)}
           {streaming && <span className="chat-caret ml-0.5 inline-block h-[1.05em] w-[2px] translate-y-[3px] rounded-full bg-ink/70" aria-hidden />}
         </p>
       )}

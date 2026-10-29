@@ -35,6 +35,9 @@ export default function AnnotationList(p: {
               exit={{ opacity: 0, x: -12 }}
               transition={{ type: "spring", stiffness: 500, damping: 38 }}
               onMouseEnter={() => p.onHover(a.id)}
+              data-cite-kind="mark"
+              data-cite-id={a.id}
+              data-cite-label={a.label}
               className={`overflow-hidden rounded-xl border transition-colors ${open ? "border-ink bg-card" : "border-line bg-card/60 hover:border-line-2"}`}
             >
               <div className="flex items-center pr-2">

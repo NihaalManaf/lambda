@@ -101,7 +101,7 @@ function Box({ id, data, className, round }: P & { className: string; round: str
     <Shell id={id} data={data} round={round}>
       <div className={clsx("relative flex size-full items-center justify-center", round, className)}>
         <Ports />
-        <span className={label}>{data.label}</span>
+        <span className={label} data-label>{data.label}</span>
         <Pins pins={data.pins} />
       </div>
     </Shell>
@@ -116,7 +116,9 @@ function Svgish({ id, data, width = 0, height = 0, shape }: P & { shape: (w: num
           {shape(width, height)}
         </svg>
         <Ports />
-        <span className={clsx(label, "relative max-w-[66%] px-0")}>{data.label}</span>
+        <span className={clsx(label, "relative max-w-[66%] px-0")} data-label>
+          {data.label}
+        </span>
         <Pins pins={data.pins} />
       </div>
     </Shell>

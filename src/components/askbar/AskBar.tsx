@@ -10,6 +10,7 @@ import { featureMode, type FeatureView } from "@/lib/types";
 import { focusRef, useChat } from "@/components/chat/useChat";
 import Thread, { type Suggestion } from "./Thread";
 import Evolution from "@/components/Evolution";
+import { citeCss, encode, short, useCiteMode, type Cite } from "@/components/cite/cite";
 
 // ask lambda: a pill pinned bottom-center that grows upward into a thread attached to it (one surface,
 // layout-animated), and folds back down. Same feature.chat as the intake: the conversation just continues.
@@ -100,10 +101,42 @@ export default function AskBar({ feature, pieceId, onChange, onFocus, view }: As
     return () => clearTimeout(t);
   }, [confirmClear]);
 
+  // ⌥-click in a visualization cites it: `@label` lands at the cursor, the token it stands for is kept here
+  const [cites, setCites] = useState<Record<string, string>>({}); // `@label` → token
+  useCiteMode();
+  useEffect(() => {
+    if (hidden) return;
+    const onCite = (e: Event) => {
+      const c = (e as CustomEvent<Cite>).detail;
+      const tag = short(c);
+      setCites((m) => ({ ...m, [tag]: encode(c) }));
+      const el = inputRef.current;
+      setDraft((d) => {
+        const at = el && document.activeElement === el ? el.selectionStart : d.length;
+        const before = d.slice(0, at), after = d.slice(at);
+        const pad = before && !/\s$/.test(before) ? " " : "";
+        const next = `${before}${pad}${tag} ${after.replace(/^ /, "")}`;
+        const caret = before.length + pad.length + tag.length + 1;
+        requestAnimationFrame(() => {
+          inputRef.current?.focus({ preventScroll: true });
+          inputRef.current?.setSelectionRange(caret, caret);
+        });
+        return next;
+      });
+      if (!open) show("click");
+    };
+    window.addEventListener("lambda:cite", onCite);
+    return () => window.removeEventListener("lambda:cite", onCite);
+  }, [hidden, open, show]);
+
   const submit = (text = draft) => {
     if (!text.trim() || busy) return;
     if (!open) show("click");
-    send(text);
+    // `@label` → the token the model reads (ids from its snapshot); edited-away labels just stay text
+    let full = text;
+    for (const [tag, token] of Object.entries(cites)) full = full.split(tag).join(token);
+    setCites({});
+    send(full);
     setDraft("");
   };
 
@@ -133,6 +166,7 @@ export default function AskBar({ feature, pieceId, onChange, onFocus, view }: As
 
   return createPortal(
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <style>{citeCss}</style>
       <motion.div
         ref={shell}
         layout
@@ -226,7 +260,8 @@ export default function AskBar({ feature, pieceId, onChange, onFocus, view }: As
               onSubmit={() => submit()}
               busy={busy}
               onStop={stop}
-              idle={featureMode(feature) === "understand" ? "ask how it works…" : undefined}
+              idle={featureMode(feature) === "understand" ? "ask how it works… ⌥-click anything to cite it" : undefined}
+              tags={Object.keys(cites)}
             />
           ) : (
             <button
@@ -265,8 +300,16 @@ function PieceTag({ feature, pieceId }: { feature: FeatureView; pieceId: string 
   );
 }
 
+// the composer's text with each cited `@label` wrapped in a lilac highlight (for the mirror layer)
+function highlight(text: string, tags: string[]) {
+  const live = tags.filter((t) => text.includes(t));
+  if (!live.length) return text;
+  const re = new RegExp(`(${live.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "g");
+  return text.split(re).map((part, i) => (live.includes(part) ? <mark key={i} className="rounded-[5px] bg-lilac-soft text-transparent shadow-[0_0_0_2px_var(--lilac-soft)]">{part}</mark> : part));
+}
+
 function Composer({
-  inputRef, value, onChange, onSubmit, busy, onStop, idle = "add a story, ask the code…",
+  inputRef, value, onChange, onSubmit, busy, onStop, idle = "add a story, ask the code… ⌥-click anything to cite it", tags = [],
 }: {
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
   value: string;
@@ -275,7 +318,9 @@ function Composer({
   busy: boolean;
   onStop: () => void;
   idle?: string;
+  tags?: string[]; // cited `@label`s: highlighted where they sit in the text
 }) {
+  const mirror = useRef<HTMLDivElement>(null);
   // autosize: grow with content up to ~6 lines
   useLayoutEffect(() => {
     const el = inputRef.current;
@@ -295,10 +340,20 @@ function Composer({
     >
       <div className="flex items-end gap-2 rounded-[16px] border border-line-2 bg-card py-1 pl-3.5 pr-1 transition-[border-color,box-shadow] duration-150 focus-within:border-ink focus-within:shadow-[0_0_0_3px_rgba(231,163,255,0.4)]">
         <span aria-hidden="true" className="display mb-1.5 mr-1 flex h-6 shrink-0 items-center text-lg leading-none text-ink">λ</span>
+        <div className="relative min-w-0 flex-1">
+        {/* same box + type as the textarea, text invisible: only the cite highlights show through */}
+        <div
+          ref={mirror}
+          aria-hidden
+          className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words py-1.5 text-[14px] leading-snug text-transparent"
+        >
+          {highlight(value, tags)}
+        </div>
         <textarea
           ref={inputRef}
           rows={1}
           value={value}
+          onScroll={(e) => mirror.current && (mirror.current.scrollTop = e.currentTarget.scrollTop)}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -308,7 +363,7 @@ function Composer({
           }}
           placeholder={busy ? "" : idle}
           aria-label="message lambda"
-          className="max-h-40 min-h-[24px] flex-1 resize-none bg-transparent py-1.5 text-[14px] leading-snug text-ink outline-none placeholder:text-grey"
+          className="relative block max-h-40 min-h-[24px] w-full resize-none bg-transparent py-1.5 text-[14px] leading-snug text-ink outline-none placeholder:text-grey"
         />
         {busy && !value && (
           <div
@@ -321,6 +376,7 @@ function Composer({
             </span>
           </div>
         )}
+        </div>
         {busy ? (
           <button
             type="button"
