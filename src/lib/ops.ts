@@ -9,8 +9,8 @@ import type { AcceptanceDraft } from "./ops-drafts";
 import type { FlowLens, FlowNodeKind, Priority } from "./types";
 
 export type StoryOp =
-  | { op: "add_story"; role: string; want: string; soThat: string; priority?: Priority; acceptance?: AcceptanceDraft[] }
-  | { op: "update_story"; storyId: string; role?: string; want?: string; soThat?: string; priority?: Priority }
+  | { op: "add_story"; role: string; want: string; soThat: string; priority?: Priority; step?: string; acceptance?: AcceptanceDraft[] }
+  | { op: "update_story"; storyId: string; role?: string; want?: string; soThat?: string; priority?: Priority; step?: string }
   | { op: "remove_story"; storyId: string }
   | { op: "add_criterion"; storyId: string; criterion: AcceptanceDraft }
   | { op: "update_criterion"; storyId: string; criterionId: string; criterion: Partial<AcceptanceDraft> }

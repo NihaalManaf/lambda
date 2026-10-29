@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Image from "next/image";
 import { AnimatePresence, LayoutGroup, MotionConfig, motion } from "motion/react";
 import clsx from "clsx";
@@ -22,9 +22,32 @@ type Col = {
   title: string;
   n?: number;
   match: (s: Story) => boolean;
-  drop: { priority?: Priority };
-  seed: { priority?: Priority };
+  drop: { priority?: Priority; step?: string };
+  seed: { priority?: Priority; step?: string };
 };
+
+// Board grouping: by the user's journey (steps across, importance down each step — story mapping) or the
+// older must / should / could lanes. Remembered per browser.
+type Group = "journey" | "priority";
+const GROUP_KEY = "lambda:stories-group";
+const readGroup = (): Group => {
+  try {
+    return localStorage.getItem(GROUP_KEY) === "priority" ? "priority" : "journey";
+  } catch {
+    return "journey";
+  }
+};
+const onGroup = (cb: () => void) => {
+  window.addEventListener(GROUP_KEY, cb);
+  return () => window.removeEventListener(GROUP_KEY, cb);
+};
+const writeGroup = (g: Group) => {
+  try {
+    localStorage.setItem(GROUP_KEY, g);
+  } catch {}
+  window.dispatchEvent(new Event(GROUP_KEY));
+};
+const RANK: Record<Priority, number> = { must: 0, should: 1, could: 2 };
 type Pt = { x: number; y: number };
 
 // Column under a page-coord point. Tiles are skipped: the dragged tile sits on top of the stack but still lives
@@ -141,14 +164,47 @@ export default function StoriesTab({ feature, onChange }: { feature: FeatureView
     };
   }, []);
 
-  // Columns: priority lanes (a piece's stories have priorities only; pieces replaced slices).
-  const cols: Col[] = PRIORITIES.map((p) => ({
-    id: p,
-    title: p,
-    match: (s: Story) => s.priority === p,
-    drop: { priority: p },
-    seed: { priority: p },
-  }));
+  const group = useSyncExternalStore(onGroup, readGroup, () => "journey" as Group);
+  const journey = useMemo(() => feature.pieces.find((p) => p.id === feature.pieceId)?.journey ?? [], [feature.pieces, feature.pieceId]);
+  const unplaced = stories.filter((s) => !s.step || !journey.includes(s.step));
+
+  // journey view: name the steps / place new stories once per set of unplaced stories (not on every render)
+  const [mapping, setMapping] = useState(false);
+  const tried = useRef("");
+  const sig = `${feature.pieceId}:${unplaced.map((s) => s.id).join(",")}`;
+  useEffect(() => {
+    if (group !== "journey" || !unplaced.length || jobBusy || mapping || tried.current === sig) return;
+    tried.current = sig;
+    setMapping(true);
+    storiesApi
+      .journey(fid, feature.pieceId)
+      .then(onChange, (e: Error) => setErr(`couldn't map the journey: ${e.message}`))
+      .finally(() => setMapping(false));
+  }, [group, sig, unplaced, jobBusy, mapping, fid, feature.pieceId, onChange]);
+
+  // Columns: journey steps (importance read down each), or the priority lanes.
+  const byJourney = group === "journey" && journey.length > 0;
+  const cols: Col[] = byJourney
+    ? [
+        ...journey.map((step, i) => ({
+          id: `step:${step}`,
+          title: step,
+          n: i + 1,
+          match: (s: Story) => s.step === step,
+          drop: { step },
+          seed: { step },
+        })),
+        ...(unplaced.length
+          ? [{ id: "step:", title: mapping ? "placing…" : "unplaced", match: (s: Story) => !s.step || !journey.includes(s.step), drop: { step: "" }, seed: {} }]
+          : []),
+      ]
+    : PRIORITIES.map((p) => ({
+        id: p,
+        title: p,
+        match: (s: Story) => s.priority === p,
+        drop: { priority: p },
+        seed: { priority: p },
+      }));
 
   // a tile dragged onto a piece card in the rail moves there (with its runs)
   const overPiece = useRef<string | null>(null);
@@ -211,8 +267,28 @@ export default function StoriesTab({ feature, onChange }: { feature: FeatureView
         ) : (
           <LayoutGroup>
             <div className="flex items-center justify-end gap-2">
-              {/* old tiles stay while the job rewrites them (facts → stories → check) */}
-              {jobBusy && <span className="mr-auto font-mono text-[11px] text-grey">{reading ? "reading the code…" : "rewriting…"}</span>}
+              <div className="mr-auto flex items-center gap-3">
+                <div className="flex rounded-full border border-line-2 bg-card p-0.5" role="radiogroup" aria-label="group stories by">
+                  {(["journey", "priority"] as const).map((g) => (
+                    <button
+                      key={g}
+                      role="radio"
+                      aria-checked={group === g}
+                      onClick={() => writeGroup(g)}
+                      title={g === "journey" ? "steps a user goes through, most important first in each" : "must / should / could"}
+                      className={clsx("rounded-full px-3 py-1 text-[13px] transition-colors", group === g ? "bg-ink text-paper" : "text-ink-2 hover:text-ink")}
+                    >
+                      {g}
+                    </button>
+                  ))}
+                </div>
+                {/* old tiles stay while the job rewrites them (facts → stories → check) */}
+                {jobBusy ? (
+                  <span className="font-mono text-[11px] text-grey">{reading ? "reading the code…" : "rewriting…"}</span>
+                ) : (
+                  mapping && <span className="font-mono text-[11px] text-grey">{journey.length ? "placing new stories…" : "mapping the journey…"}</span>
+                )}
+              </div>
               <button className="btn btn-ghost" onClick={() => run("generate")} disabled={!!busy || jobBusy}>
                 regenerate
               </button>
@@ -228,6 +304,7 @@ export default function StoriesTab({ feature, onChange }: { feature: FeatureView
               <AnimatePresence initial={false} mode="popLayout">
                 {cols.map((c) => {
                   const items = stories.filter(c.match);
+                  if (byJourney) items.sort((a, b) => RANK[a.priority] - RANK[b.priority]); // importance, top down
                   return (
                     <motion.div
                       key={c.id}
@@ -246,7 +323,7 @@ export default function StoriesTab({ feature, onChange }: { feature: FeatureView
                       <div className="flex min-w-0 items-center gap-2 px-1 pb-3 pt-1">
                         {c.n && <span className="display text-2xl">{c.n}</span>}
                         <span className="truncate text-sm font-semibold">{c.title}</span>
-                        <Meter p={c.id as Priority} />
+                        {!byJourney && <Meter p={c.id as Priority} />}
                         <span className="ml-auto font-mono text-[11px] text-grey">{items.length}</span>
                       </div>
                       <div className="flex flex-1 flex-col gap-3">
@@ -275,7 +352,7 @@ export default function StoriesTab({ feature, onChange }: { feature: FeatureView
                         onClose={() => setCompose((x) => (x === c.id ? null : x))}
                         defaultRole={role}
                         defaultPriority={c.seed.priority}
-                        onAdd={(s) => op({ op: "add_story", ...s })}
+                        onAdd={(s) => op({ op: "add_story", ...s, ...(c.seed.step ? { step: c.seed.step } : {}) })}
                       />
                     </motion.div>
                   );

@@ -212,6 +212,7 @@ export interface Story {
   want: string;
   soThat: string;
   priority: Priority;
+  step?: string; // the journey step it belongs to (one of its piece's journey)
   sliceId?: string; // legacy, unused (pieces replaced slices)
   acceptance: Acceptance[];
   status: StoryStatus;
@@ -289,6 +290,7 @@ export interface Piece extends PieceArtifacts {
   schemaFocus?: SchemaFocus; // understand: the tables it uses today (src/lib/schema/focus.ts)
   facts?: PieceFacts; // read from the code by the "facts" job (src/lib/grounding.ts); grounds stories / flows / needs
   check?: PieceCheck; // last "check" job: stories + flows verified against the code
+  journey?: string[]; // ordered steps of the user's journey through this piece; stories group under them (src/lib/journey.ts)
 }
 
 // What a Claude Code session read in the checkout for one piece. Every item cites file(:line).

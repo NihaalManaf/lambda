@@ -23,6 +23,9 @@ export const storiesApi = {
       body: JSON.stringify({ ops, pieceId: pieceId || undefined }),
       keepalive,
     }),
+  // name the piece's journey steps and place every story in one (src/lib/journey.ts)
+  journey: (fid: string, pieceId?: string) =>
+    call<FeatureView>(`${base(fid)}/journey`, { method: "POST", body: JSON.stringify({ pieceId: pieceId || undefined }) }),
   verify: (fid: string, storyId: string) =>
     call<{ feature: FeatureView; runId: string }>(`${base(fid)}/verify`, { method: "POST", body: JSON.stringify({ storyId }) }),
 };

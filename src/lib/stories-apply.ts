@@ -62,6 +62,7 @@ export function applyStoryOpWith(f: Target, op: StoryOp, mkId: MkId): ChangeNote
         acceptance: (op.acceptance ?? []).slice(0, MAX_CRITERIA).map((a) => toCriterion(a, mkId)),
         status: "todo",
       };
+      if (clean(op.step)) s.step = clean(op.step);
       f.stories.push(s);
       return note("+", "story", want, s.id);
     }
@@ -71,6 +72,10 @@ export function applyStoryOpWith(f: Target, op: StoryOp, mkId: MkId): ChangeNote
       if (clean(op.want)) s.want = clean(op.want);
       if (op.soThat !== undefined) s.soThat = clean(op.soThat);
       if (pri(op.priority)) s.priority = pri(op.priority)!;
+      if (op.step !== undefined) {
+        if (clean(op.step)) s.step = clean(op.step);
+        else delete s.step;
+      }
       return note("~", "story", s.want, s.id);
     }
     case "remove_story": {
