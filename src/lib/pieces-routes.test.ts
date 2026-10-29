@@ -5,7 +5,9 @@ import { POST as ops } from "@/app/api/features/[id]/ops/route";
 import { DELETE as delStory } from "@/app/api/features/[id]/stories/route";
 import { getFeature, updateFeature } from "@/lib/store";
 import { makePiece } from "./pieces";
-import type { Feature, FeatureView } from "./types";
+import { POST as proposeSchema } from "@/app/api/features/[id]/schema/route";
+import { queueJobsInPlace } from "./jobs";
+import { featureMode, type Feature, type FeatureView } from "./types";
 
 // Route-level wiring on pieces (no model calls). LAMBDA_DATA_DIR is a temp dir (vitest.config.ts).
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
@@ -17,6 +19,29 @@ describe("feature routes on pieces", () => {
     expect(f.phase).toBe("intake");
     expect(f.pieces).toEqual([]);
     expect(f.jobs ?? []).toEqual([]);
+  });
+
+  it("mode: absent = build, understand persists, anything else falls back to build", async () => {
+    const b = (await (await create(post("http://x", { title: "build one" }))).json()) as Feature;
+    expect("mode" in b).toBe(false); // build stays byte-identical to pre-mode data
+    expect(featureMode(getFeature(b.id)!)).toBe("build");
+    const u = (await (await create(post("http://x", { title: "how invites work", mode: "understand" }))).json()) as Feature;
+    expect(getFeature(u.id)!.mode).toBe("understand");
+    const x = (await (await create(post("http://x", { title: "bogus", mode: "ship" }))).json()) as Feature;
+    expect(featureMode(getFeature(x.id)!)).toBe("build");
+  });
+
+  it("understand: schema / queue proposals are build-only", async () => {
+    const u = (await (await create(post("http://x", { title: "how billing works", mode: "understand" }))).json()) as Feature;
+    const res = await proposeSchema(post("http://x", { source: "sql", sql: "create table t (id int);" }), ctx(u.id));
+    expect(res.status).toBe(409);
+    let queued: string[] = [];
+    await updateFeature(u.id, (f) => {
+      f.pieces = [makePiece({ title: "one", order: 1 })];
+      queued = queueJobsInPlace(f, ["schema", "queues"]);
+    });
+    expect(queued).toEqual([]);
+    expect(getFeature(u.id)!.pieces[0].needs).toBeUndefined();
   });
 
   it("ops edit the requested piece and return its view", async () => {

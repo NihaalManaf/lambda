@@ -78,6 +78,7 @@ export default function StoryTile({
     armed.current = false;
   };
   const n = story.acceptance.length;
+  const u = story.acceptance.filter((a) => a.unverified).length; // the check stage couldn't back these with the code
 
   return (
     <motion.div
@@ -150,6 +151,11 @@ export default function StoryTile({
           <LiveIcon s={live} size={13} />
           {live !== "untested" && LIVE[live].label}
         </span>
+        {u > 0 && (
+          <span className="text-[10.5px] text-warn" title={`${u} ${u === 1 ? "criterion isn't" : "criteria aren't"} backed by the code`}>
+            {u === 1 ? "unverified" : `${u} unverified`}
+          </span>
+        )}
       </div>
     </motion.div>
   );

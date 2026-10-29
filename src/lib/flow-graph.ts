@@ -98,6 +98,7 @@ export function splitChart(c: Flowchart, max = MAX_FLOW_NODES): Flowchart[] {
       id: `${c.id}_${p + 1}`,
       title: `${c.title.replace(/( · \d+\/\d+)+$/, "")} · ${p + 1}/${k}`, // no nested '· 1/2 · 1/2'
       summary: c.summary,
+      ...(c.schedules ? { schedules: c.schedules.filter((s) => ids.has(s.nodeId)) } : {}),
       nodes,
       edges,
       edgeCases: c.edgeCases.filter((ec) => ids.has(ec.nodeId)),
@@ -213,12 +214,14 @@ export function applyGraphOp(feature: { flowcharts: FlowchartSet[] }, op: GraphO
       const label = words(op.label, 5);
       if (!label) throw new Error("label required");
       node.label = label;
+      if (!op.keepDescription) delete node.description;
       n = note("~", "node", label, node.id);
       break;
     }
     case "set_node_kind": {
       const node = nodeOf(c, op.nodeId);
       node.kind = op.kind;
+      delete node.description;
       n = note("~", "node", `${node.label} → ${op.kind}`, node.id);
       break;
     }
@@ -248,6 +251,7 @@ export function applyGraphOp(feature: { flowcharts: FlowchartSet[] }, op: GraphO
       c.nodes = c.nodes.filter((x) => x.id !== node.id);
       c.edges = c.edges.filter((e) => e.from !== node.id && e.to !== node.id);
       c.edgeCases = c.edgeCases.filter((e) => e.nodeId !== node.id);
+      if (c.schedules) c.schedules = c.schedules.filter((s) => s.nodeId !== node.id);
       // reconnect predecessors → successors; a branch label on the way in survives
       for (const i of ins) for (const o of outs) link(c, i.from, o.to, i.label);
       n = note("−", "node", node.label);
@@ -286,6 +290,15 @@ export function applyGraphOp(feature: { flowcharts: FlowchartSet[] }, op: GraphO
       const ec: EdgeCase = { id: edgeCaseId(c, op.nodeId), nodeId: op.nodeId, text, handled: null };
       c.edgeCases.push(ec);
       n = note("+", "edge case", text, ec.id);
+      break;
+    }
+    case "update_edge_case": {
+      const ec = c.edgeCases.find((x) => x.id === op.edgeCaseId);
+      if (!ec) throw new Error("edge case not found");
+      const text = words(op.text, 12);
+      if (!text) throw new Error("text required");
+      ec.text = text;
+      n = note("~", "edge case", text, ec.id);
       break;
     }
     case "remove_edge_case": {

@@ -1,10 +1,12 @@
 import "server-only";
 import { z } from "zod";
 import { applyGraphOp, isGraphOp, locate, spliceParts, splitChart, words } from "./flow-graph";
+import { factsOf, groundingPrompt } from "./facts";
 import { featurePrompt, generate } from "./llm";
 import type { ChangeNote, FlowOp } from "./ops";
-import { id, now } from "./store";
+import { getSettings, id, now } from "./store";
 import {
+  featureMode,
   MAX_FLOW_NODES,
   type EdgeCase,
   type FeatureView,
@@ -34,13 +36,24 @@ you draw SUPER simple flowcharts that expose edge cases and decisions. slop is t
 hard rules:
 - 1-5 charts. each chart <= ${MAX_FLOW_NODES} nodes, ideally 4-7. a big flow MUST be split into several small charts, each a coherent sub-journey with its own start and end. never one big chart.
 - node label <= 5 words, a fragment ("enter email", "token valid?"). decisions end with "?".
+- each node also has a description: 1-2 short plain-language sentences explaining what THIS step does, its inputs/result or decision, grounded in supplied context. Expand jargon; don't merely repeat the label, invent behavior, or confuse a proposed step with implemented code. These descriptions are shown on hover.
 - kinds: start, end (pills), step, decision (2+ labeled out-edges), error (failure the user sees), external (third party), store (db/cache/file).
 - edge label <= 3 words, ONLY on decision branches ("yes", "no", "expired"), else null.
 - node ids short and unique within a chart ("n1", "n2"...). edges reference those ids.
 - edge cases: the unhappy paths not drawn as nodes — error, empty state, permission denied, timeout, double-submit, stale data, offline, rate limit. attach each to the node where it bites. <= 12 words. 2-6 per chart, only real ones.
 - title <= 4 words. summary <= 12 words.
+- for cron/scheduled triggers, include schedules attached to the triggering nodeId: job name, plain-language timing (e.g. "daily at 09:00" or "every 15 minutes"), exact cron expression, timezone, and source file:line. Read the actual registration/config in the supplied code context, not just the handler name. If timing is not evidenced, say "schedule not specified"; use null for unknown expression, timezone or source. Never assume UTC or invent run times. Keep webhook/manual triggers distinct; a schedule applies only to the named cron job, not all invocations. Non-scheduled charts have an empty schedules array.
 - choose the right granularity for the lens; skip trivial steps; no invented requirements.
 `.trim();
+
+// understand: same caps + schema, drawn as implemented today
+const SYSTEM_UNDERSTAND = `${SYSTEM}
+understand mode: draw the flow AS IMPLEMENTED today, with real screen / route / table / service names from the code.
+edge case labels say how the code handles them (e.g. "expired token → redirects to /login"). never add steps the code doesn't have.`;
+// settings.edgeCases false: none drawn (and any the model sends anyway are dropped in clean)
+const NO_EDGE_CASES = "\nedge cases are switched off: always return an empty edgeCases array.";
+export const edgeCasesOn = () => getSettings().edgeCases !== false;
+const systemFor = (f: FeatureView) => (featureMode(f) === "understand" ? SYSTEM_UNDERSTAND : SYSTEM) + (edgeCasesOn() ? "" : NO_EDGE_CASES);
 
 const Out = z.object({
   title: z.string().describe("set title, <= 4 words"),
@@ -48,7 +61,15 @@ const Out = z.object({
     z.object({
       title: z.string(),
       summary: z.string(),
-      nodes: z.array(z.object({ id: z.string(), label: z.string(), kind: z.enum(KINDS) })),
+      schedules: z.array(z.object({
+        nodeId: z.string(),
+        job: z.string(),
+        timing: z.string(),
+        expression: z.string().nullable(),
+        timezone: z.string().nullable(),
+        source: z.string().nullable(),
+      })).optional(),
+      nodes: z.array(z.object({ id: z.string(), label: z.string(), kind: z.enum(KINDS), description: z.string().optional() })),
       edges: z.array(z.object({ from: z.string(), to: z.string(), label: z.string().nullable() })),
       edgeCases: z.array(z.object({ nodeId: z.string(), text: z.string() })),
     }),
@@ -64,7 +85,7 @@ export function sanitizeChart(raw: z.infer<typeof Out>["charts"][number], lens: 
     const nid = n.id.trim() || `_auto${i}`; // can't collide with model ids
     if (seen.has(nid)) return;
     seen.add(nid);
-    nodes.push({ id: nid, label: words(n.label, 5), kind: n.kind });
+    nodes.push({ id: nid, label: words(n.label, 5), kind: n.kind, ...(n.description?.trim() ? { description: n.description.trim() } : {}) });
   });
   const kindOf = new Map(nodes.map((n) => [n.id, n.kind]));
   const pairs = new Set<string>();
@@ -79,27 +100,39 @@ export function sanitizeChart(raw: z.infer<typeof Out>["charts"][number], lens: 
     const label = labelled && e.label ? words(e.label, 3) : undefined;
     edges.push({ id: id("fe"), from, to, ...(label ? { label } : {}) });
   }
-  const edgeCases: EdgeCase[] = raw.edgeCases
+  const edgeCases: EdgeCase[] = (edgeCasesOn() ? raw.edgeCases : [])
     .map((c) => ({ ...c, nodeId: c.nodeId.trim() }))
     .filter((c) => kindOf.has(c.nodeId) && c.text.trim())
     .map((c) => ({ id: id("ec"), nodeId: c.nodeId, text: words(c.text, 12), handled: null }));
-  return { id: id("fc"), title: words(raw.title, 5), summary: words(raw.summary, 12), nodes, edges, edgeCases };
+  const schedules = (raw.schedules ?? [])
+    .filter((s) => kindOf.has(s.nodeId.trim()))
+    .map((s) => ({
+      nodeId: s.nodeId.trim(),
+      job: s.job.trim() || "scheduled job",
+      timing: s.timing.trim() || "schedule not specified",
+      expression: s.expression?.trim() || null,
+      timezone: s.timezone?.trim() || null,
+      source: s.source?.trim() || null,
+    }));
+  return { id: id("fc"), title: words(raw.title, 5), summary: words(raw.summary, 12), nodes, edges, edgeCases, schedules };
 }
 
 export async function generateFlows(feature: FeatureView, lens: FlowLens, focus?: string, signal?: AbortSignal): Promise<FlowchartSet> {
   const existing = feature.flowcharts.map((s) => `- ${s.lens}: ${s.charts.map((c) => c.title).join(", ")}`).join("\n");
+  const g = groundingPrompt(factsOf(feature));
   const prompt = [
     featurePrompt(feature),
+    g ? `\n${g}\nnode labels, descriptions and edge cases name only screens, routes, tables and services from the facts or the brief.` : "",
     feature.stories.length
       ? `\nuser stories:\n${feature.stories.map((s) => `- as a ${s.role}, i want ${s.want}`).join("\n")}`
       : "",
     `\nlens: ${lens}\n${LENS_GUIDE[lens]}`,
     focus?.trim() ? `\nfocus: ${focus.trim()}` : "",
     existing ? `\nalready charted (don't repeat):\n${existing}` : "",
-    "\ndraw the flow set.",
+    featureMode(feature) === "understand" ? "\ndraw how this works today." : "\ndraw the flow set.",
   ].join("\n");
 
-  const out = await generate({ schema: Out, system: SYSTEM, prompt, maxTokens: 6000, signal });
+  const out = await generate({ schema: Out, system: systemFor(feature), prompt, maxTokens: 6000, signal, mode: featureMode(feature) });
   const charts = out.charts
     .slice(0, 5)
     .map((c) => sanitizeChart(c, lens))
@@ -127,7 +160,8 @@ export async function refineChart(
   const current = [
     `title: ${chart.title}`,
     `summary: ${chart.summary}`,
-    `nodes:\n${chart.nodes.map((n) => `- ${n.id} [${n.kind}] ${n.label}`).join("\n")}`,
+    `schedules: ${JSON.stringify(chart.schedules ?? [])}`,
+    `nodes:\n${chart.nodes.map((n) => `- ${n.id} [${n.kind}] ${n.label}${n.description ? `: ${n.description}` : ""}`).join("\n")}`,
     `edges:\n${chart.edges.map((e) => `- ${e.from} -> ${e.to}${e.label ? ` (${e.label})` : ""}`).join("\n") || "- none"}`,
     `edge cases:\n${chart.edgeCases.map((c) => `- @${c.nodeId}: ${c.text}`).join("\n") || "- none"}`,
   ].join("\n");
@@ -138,7 +172,7 @@ export async function refineChart(
     `\nthe developer says: "${instruction.trim()}"`,
     "\nredraw ONLY this chart with that change. keep everything they didn't ask to change (ids, labels, edge cases). one chart.",
   ].join("\n");
-  const out = await generate({ schema: ChartOut, system: SYSTEM, prompt, maxTokens: 3000, effort: "low", signal });
+  const out = await generate({ schema: ChartOut, system: systemFor(feature), prompt, maxTokens: 3000, effort: "low", signal, mode: featureMode(feature) });
   const next = sanitizeChart(out.chart, set.lens);
   if (!next.nodes.length) throw new Error("model returned an empty chart");
 

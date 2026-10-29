@@ -4,10 +4,11 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion, type Transition } from "motion/react";
 import clsx from "clsx";
+import type { ChatView } from "@/lib/chat";
 import type { ChangeNote } from "@/lib/ops";
-import type { FeatureView } from "@/lib/types";
+import { featureMode, type FeatureView } from "@/lib/types";
 import { focusRef, useChat } from "@/components/chat/useChat";
-import Thread, { SUGGESTIONS } from "./Thread";
+import Thread, { type Suggestion } from "./Thread";
 
 // ask lambda: a pill pinned bottom-center that grows upward into a thread attached to it (one surface,
 // layout-animated), and folds back down. Same feature.chat as the intake: the conversation just continues.
@@ -25,9 +26,10 @@ export interface AskBarProps {
   pieceId: string; // the selected piece: edits land here unless the message names another
   onChange: (f: FeatureView) => void;
   onFocus?: (tab: ChangeNote["tab"], ref: string | undefined, pieceId: string | undefined, note: ChangeNote) => void;
+  view?: ChatView; // what's open outside the workspace (the schema page's table)
 }
 
-export default function AskBar({ feature, pieceId, onChange, onFocus }: AskBarProps) {
+export default function AskBar({ feature, pieceId, onChange, onFocus, view }: AskBarProps) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [instant, setInstant] = useState(false);
@@ -36,7 +38,7 @@ export default function AskBar({ feature, pieceId, onChange, onFocus }: AskBarPr
   const shell = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const returnTo = useRef<HTMLElement | null>(null);
-  const { thread, pending, busy, send, stop, dismiss, undo, clear, undoError } = useChat(feature, onChange, pieceId || undefined);
+  const { thread, pending, busy, send, stop, dismiss, undo, clear, undoError } = useChat(feature, onChange, pieceId || undefined, view);
   const hidden = feature.phase === "intake"; // the intake view has its own composer
   const client = useClient();
 
@@ -104,7 +106,7 @@ export default function AskBar({ feature, pieceId, onChange, onFocus }: AskBarPr
     setDraft("");
   };
 
-  const pick = (s: (typeof SUGGESTIONS)[number]) => {
+  const pick = (s: Suggestion) => {
     if (!s.fill) return submit(s.text);
     setDraft(s.text);
     requestAnimationFrame(() => {
@@ -208,6 +210,7 @@ export default function AskBar({ feature, pieceId, onChange, onFocus }: AskBarPr
                 onDismiss={dismiss}
                 onPick={pick}
                 busy={busy}
+                mode={featureMode(feature)}
               />
             </motion.div>
           )}
@@ -215,7 +218,15 @@ export default function AskBar({ feature, pieceId, onChange, onFocus }: AskBarPr
 
         <motion.div layout="position" transition={t}>
           {open ? (
-            <Composer inputRef={inputRef} value={draft} onChange={setDraft} onSubmit={() => submit()} busy={busy} onStop={stop} />
+            <Composer
+              inputRef={inputRef}
+              value={draft}
+              onChange={setDraft}
+              onSubmit={() => submit()}
+              busy={busy}
+              onStop={stop}
+              idle={featureMode(feature) === "understand" ? "ask how it works…" : undefined}
+            />
           ) : (
             <button
               type="button"
@@ -251,7 +262,7 @@ function PieceTag({ feature, pieceId }: { feature: FeatureView; pieceId: string 
 }
 
 function Composer({
-  inputRef, value, onChange, onSubmit, busy, onStop,
+  inputRef, value, onChange, onSubmit, busy, onStop, idle = "add a story, ask the code…",
 }: {
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
   value: string;
@@ -259,6 +270,7 @@ function Composer({
   onSubmit: () => void;
   busy: boolean;
   onStop: () => void;
+  idle?: string;
 }) {
   // autosize: grow with content up to ~6 lines
   useLayoutEffect(() => {
@@ -278,6 +290,7 @@ function Composer({
       }}
     >
       <div className="flex items-end gap-2 rounded-[16px] border border-line-2 bg-card py-1 pl-3.5 pr-1 transition-[border-color,box-shadow] duration-150 focus-within:border-ink focus-within:shadow-[0_0_0_3px_rgba(231,163,255,0.4)]">
+        <span aria-hidden="true" className="display mb-1.5 mr-1 flex h-6 shrink-0 items-center text-lg leading-none text-ink">λ</span>
         <textarea
           ref={inputRef}
           rows={1}
@@ -289,7 +302,7 @@ function Composer({
               onSubmit();
             }
           }}
-          placeholder={busy ? "lambda is working…" : "add a story, ask the code…"}
+          placeholder={busy ? "lambda is working…" : idle}
           aria-label="message lambda"
           className="max-h-40 min-h-[24px] flex-1 resize-none bg-transparent py-1.5 text-[14px] leading-snug text-ink outline-none placeholder:text-grey"
         />

@@ -94,8 +94,16 @@ function linked(before: SchemaModel, after: SchemaModel, d: TableDiff): string[]
 // with one changed table the change itself must stay big: at most this many context tables
 const SOLO_CTX = 3;
 
-// touched tables first (by change size), then the FK neighbours the change runs through as faded context, capped at 8
-export function toErd(before: SchemaModel, after: SchemaModel, touched: string[], risks: Risk[], ops: SchemaOp[] = []): ErdGraph {
+// touched tables first (by change size), then the FK neighbours the change runs through as faded context, capped at 8.
+// context: false = only the touched tables and the fks between them (understand's "tables it uses today")
+export function toErd(
+  before: SchemaModel,
+  after: SchemaModel,
+  touched: string[],
+  risks: Risk[],
+  ops: SchemaOp[] = [],
+  { context = true }: { context?: boolean } = {},
+): ErdGraph {
   const r = renamesOf(ops);
   const diffs = new Map<string, TableDiff>();
   for (const id of touched) {
@@ -109,10 +117,10 @@ export function toErd(before: SchemaModel, after: SchemaModel, touched: string[]
   const rest = new Set<string>();
   for (const id of main) for (const n of neighbours(after.tables[id] ? after : before, id)) if (exists(n) && !ctx.has(n)) rest.add(n);
   const byFks = (xs: Iterable<string>) => [...xs].sort((a, b) => fkCount(after, b) - fkCount(after, a));
-  const ctxIds = byFks(ctx);
+  const ctxIds = context ? byFks(ctx) : [];
   const room = Math.max(0, Math.min(MAX_ERD_TABLES - main.length, main.length === 1 && diffs.get(main[0])!.diff !== "same" ? SOLO_CTX : MAX_ERD_TABLES));
   const shown = [...main.slice(0, MAX_ERD_TABLES), ...ctxIds.slice(0, room)];
-  const overflow = [...main.slice(MAX_ERD_TABLES), ...ctxIds.slice(room), ...byFks(rest)];
+  const overflow = [...main.slice(MAX_ERD_TABLES), ...ctxIds.slice(room), ...(context ? byFks(rest) : [])];
   const on = new Set(shown);
 
   // edges: fks between shown tables (removed fks drawn from the before model)

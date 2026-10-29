@@ -7,18 +7,28 @@ import { inline } from "@/components/inline";
 import type { ChatTurn } from "@/lib/chat";
 import type { ChangeNote } from "@/lib/ops";
 import type { Pending } from "@/components/chat/useChat";
+import type { FeatureMode } from "@/lib/types";
 
 // The ONE feature thread: intake conversation (muted) → "shaping →" divider where the brief landed →
 // edit turns with change cards, and answers from the codebase session.
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-export const SUGGESTIONS: { label: string; text: string; fill?: boolean }[] = [
-  { label: "add a story…", text: "add a story for ", fill: true },
-  { label: "missing edge cases?", text: "what edge cases are missing?" },
-  { label: "ask the code…", text: "how does the code handle ", fill: true },
-  { label: "split into pieces?", text: "should this ship as separate PRs?" },
-];
+export type Suggestion = { label: string; text: string; fill?: boolean };
+
+export const SUGGESTIONS: Record<FeatureMode, Suggestion[]> = {
+  build: [
+    { label: "add a story…", text: "add a story for ", fill: true },
+    { label: "missing edge cases?", text: "what edge cases are missing?" },
+    { label: "ask the code…", text: "how does the code handle ", fill: true },
+    { label: "split into pieces?", text: "should this ship as separate PRs?" },
+  ],
+  understand: [
+    { label: "how does it work?", text: "walk me through how the code handles ", fill: true },
+    { label: "unhappy paths?", text: "how does the code handle errors and edge cases here?" },
+    { label: "what's unclear?", text: "what's still unclear about how this works?" },
+  ],
+};
 
 // Intake history: which option each question got (from the developer's next message, which the intake view
 // sends as "question → a, b" lines, or bare "a, b" when it was the only question), and that message with the
@@ -63,6 +73,7 @@ export default function Thread({
   onDismiss,
   onPick,
   busy,
+  mode,
 }: {
   turns: ChatTurn[];
   pending: Pending | null;
@@ -73,8 +84,9 @@ export default function Thread({
   onChip: (n: ChangeNote) => void;
   onRetry: (text: string) => void;
   onDismiss: () => void;
-  onPick: (s: (typeof SUGGESTIONS)[number]) => void;
+  onPick: (s: Suggestion) => void;
   busy: boolean;
+  mode: FeatureMode;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true); // follow the bottom unless the reader scrolled up
@@ -93,7 +105,7 @@ export default function Thread({
       <div className="px-4 pb-3 pt-4">
         <p className="text-[13px] text-grey">stories, flows, pieces, the code — just say it.</p>
         <div className="mt-3 flex flex-wrap gap-1.5">
-          {SUGGESTIONS.map((s) => (
+          {SUGGESTIONS[mode].map((s) => (
             <button
               key={s.label}
               type="button"
@@ -141,7 +153,7 @@ export default function Thread({
                 />
               )}
             </li>
-            {i === shapedAt && <ShapingDivider />}
+            {i === shapedAt && <ShapingDivider mode={mode} />}
           </Fragment>
         ))}
         {pending && (
@@ -189,11 +201,12 @@ export default function Thread({
   );
 }
 
-function ShapingDivider() {
+function ShapingDivider({ mode }: { mode: FeatureMode }) {
+  const word = mode === "understand" ? "mapping" : "shaping";
   return (
-    <li className="flex items-center gap-3 py-1" aria-label="intake settled, shaping began">
+    <li className="flex items-center gap-3 py-1" aria-label={`intake settled, ${word} began`}>
       <span className="h-px flex-1 bg-line" />
-      <span className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-grey">shaping →</span>
+      <span className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-grey">{word} →</span>
       <span className="h-px flex-1 bg-line" />
     </li>
   );

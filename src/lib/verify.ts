@@ -217,7 +217,9 @@ export async function startRun(
   const account = accountId ? settings.accounts.find((a) => a.id === accountId) : undefined;
   if (accountId && !account) throw new Error("test account not found");
   // a paid browser run against some other repo's dev server is worse than no run
-  const base = settings.frontendUrl;
+  // lambda's own running frontend when its stack is up, else the configured app url. With an approved stack
+  // plan it waits for lambda's app and throws when it isn't up — never runs against the developer's server.
+  const base = await import("./stack").then((m) => m.appBase(settings), () => settings.frontendUrl);
   const other = await wrongApp(base, settings.repoPath);
   if (other) throw new Error(other);
   const key = `${feature.id}:${storyId}`;

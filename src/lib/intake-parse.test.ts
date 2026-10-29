@@ -71,6 +71,25 @@ describe("parseReply", () => {
   });
 });
 
+describe("lambda-issue blocks", () => {
+  it("collects valid issues, drops junk, keeps prose", () => {
+    const raw = [
+      "renewals read `billing.py`.",
+      '```lambda-issue\n{"title": "renewal uses list price not quote", "detail": "billing.py:88", "kind": "bug"}\n```',
+      '```lambda-issue {"title": "", "kind": "bug"}```',
+      '```lambda-issue {"title": "trial expiry has no email", "kind": "weird"}```',
+      '```lambda-issue {"title": "renewal uses list price not quote", "kind": "bug"}```',
+    ].join("\n");
+    const r = parseReply(raw);
+    expect(r.text).toBe("renewals read `billing.py`.");
+    expect(r.issues).toEqual([
+      { title: "renewal uses list price not quote", detail: "billing.py:88", kind: "bug" },
+      { title: "trial expiry has no email", kind: "improvement" },
+    ]);
+    expect(visibleText(raw).trim()).toBe("renewals read `billing.py`."); // streaming view hides the blocks too
+  });
+});
+
 describe("visibleText", () => {
   it("hides finished blocks, an unclosed fence, and a half-typed opener", () => {
     expect(visibleText('found it.\n```lambda-ask\n{"question":"a?","options":[]}\n```\nok')).toBe("found it.\n\nok");

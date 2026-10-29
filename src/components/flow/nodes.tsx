@@ -71,6 +71,7 @@ function Shell({ id, data, children, round }: { id: string; data: FlowNodeData; 
   const reduce = useReducedMotion();
   return (
     <motion.div
+      title={!connecting && selected !== id ? data.description : undefined}
       initial={data.fresh && !reduce ? { opacity: 0, scale: 0.92 } : false}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ type: "spring", duration: 0.35, bounce: 0.15 }}

@@ -39,10 +39,12 @@ export default function SchemaExplorer({
   head,
   initialTable,
   initialMigration,
+  onTable,
 }: {
   head: SchemaHead;
   initialTable?: string;
   initialMigration?: string;
+  onTable?: (table: string | null) => void; // the open table (the ask bar tells the chat)
 }) {
   const migs = head.migrations;
   const n = migs.length;
@@ -116,11 +118,13 @@ export default function SchemaExplorer({
       setTable(id);
       setIdx(n);
       syncUrl("table", id);
+      onTable?.(id);
     },
-    [n],
+    [n, onTable],
   );
   const closeTable = () => {
     setTable(null);
+    onTable?.(null);
     setTview(null);
     syncUrl("table", null);
   };

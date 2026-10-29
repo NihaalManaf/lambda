@@ -17,10 +17,10 @@ export interface ContextRef {
 
 // feature-level jobs live on feature.jobs; piece-level jobs live on piece.jobs
 export type FeatureJobKind = "intake" | "context" | "pieces";
-export type PieceJobKind = "stories" | "flows" | "schema" | "queues" | "needs" | "sketch";
+export type PieceJobKind = "facts" | "stories" | "flows" | "schema" | "queues" | "needs" | "sketch" | "check";
 export type JobKind = FeatureJobKind | PieceJobKind;
 export const FEATURE_JOB_KINDS: FeatureJobKind[] = ["intake", "context", "pieces"];
-export const PIECE_JOB_KINDS: PieceJobKind[] = ["stories", "flows", "schema", "queues", "needs", "sketch"];
+export const PIECE_JOB_KINDS: PieceJobKind[] = ["facts", "stories", "flows", "schema", "queues", "needs", "sketch", "check"];
 export const isFeatureJobKind = (k: string): k is FeatureJobKind => (FEATURE_JOB_KINDS as string[]).includes(k);
 export type JobStatus = "queued" | "running" | "done" | "error";
 
@@ -64,7 +64,7 @@ export interface ChatMessage {
 // `after` fingerprints the same fields right after the turn: undo is refused once anything else changed them.
 export interface ChatUndo {
   turnId: string;
-  before: Pick<Feature, "title" | "brief" | "context" | "contextDismissed" | "pieces">;
+  before: Pick<Feature, "title" | "brief" | "context" | "contextDismissed" | "pieces" | "issues">;
   after: string;
 }
 
@@ -89,6 +89,7 @@ export type FlowLens = "customer-journey" | "data" | "infra" | "state" | "custom
 export type FlowNodeKind = "start" | "step" | "decision" | "end" | "error" | "external" | "store";
 
 export interface FlowNode {
+  description?: string;
   id: string;
   label: string; // <= 5 words
   kind: FlowNodeKind;
@@ -108,10 +109,20 @@ export interface EdgeCase {
   handled: boolean | null; // null = unknown, needs a decision
 }
 
+export interface FlowSchedule {
+  nodeId: string;
+  job: string;
+  timing: string;
+  expression: string | null;
+  timezone: string | null;
+  source: string | null;
+}
+
 export interface Flowchart {
   id: string;
   title: string;
   summary: string; // <= 12 words
+  schedules?: FlowSchedule[];
   nodes: FlowNode[]; // hard cap: MAX_FLOW_NODES
   edges: FlowEdge[];
   edgeCases: EdgeCase[];
@@ -147,6 +158,7 @@ export interface DomBox extends Box {
   tag: string;
   text: string;
   role?: string;
+  floating?: boolean; // small position:fixed widget (fab, chat bubble, toast): drawn over the page, not part of its flow
 }
 
 export type AnnotationKind = "insert" | "remove" | "move" | "change-text" | "restyle" | "note";
@@ -168,6 +180,7 @@ export interface Mockup {
   shot: string; // filename under data/shots
   width: number;
   height: number;
+  fold?: number; // viewport height at capture: the first screen
   elements: DomBox[];
   annotations: Annotation[];
   intent?: string; // last sketch intent
@@ -186,8 +199,9 @@ export interface Acceptance {
   given: string;
   when: string;
   then: string;
-  startPath: string; // route the browser test starts at, e.g. "/campaigns"
+  startPath: string; // route the browser test starts at: one of the app's real routes
   steps: string[]; // concrete browser steps, each <= 12 words
+  unverified?: string; // check stage: why it isn't backed by the code (unknown route, contradicted). an edit clears it
 }
 
 export type StoryStatus = "todo" | "building" | "passing" | "failing";
@@ -246,6 +260,12 @@ export interface Risk {
 
 export type FeaturePhase = "intake" | "shaping" | "ready"; // intake = conversation in progress
 
+// build = shape a new feature (default). understand = explain an EXISTING feature as it works today.
+export type FeatureMode = "build" | "understand";
+// absent (pre-mode data) or anything unknown reads as build
+export const featureMode = (f: { mode?: FeatureMode | string } | null | undefined): FeatureMode =>
+  f?.mode === "understand" ? "understand" : "build";
+
 // Everything built for one shippable PR.
 export interface PieceArtifacts {
   stories: Story[];
@@ -266,6 +286,42 @@ export interface Piece extends PieceArtifacts {
   scope?: string[]; // from the brief: what this PR covers
   status: FeatureStatus;
   jobs?: Job[]; // piece-level jobs (PieceJobKind)
+  schemaFocus?: SchemaFocus; // understand: the tables it uses today (src/lib/schema/focus.ts)
+  facts?: PieceFacts; // read from the code by the "facts" job (src/lib/grounding.ts); grounds stories / flows / needs
+  check?: PieceCheck; // last "check" job: stories + flows verified against the code
+}
+
+// What a Claude Code session read in the checkout for one piece. Every item cites file(:line).
+// understand: as it works today; build: where the change will live + what exists that it builds on.
+export interface PieceFacts {
+  routes: { path: string; screen: string; labels: string[]; file: string }[];
+  endpoints: { method: string; path: string; file: string }[];
+  tables: string[];
+  gates: { what: string; file: string }[];
+  components: { name: string; file: string }[];
+  notes: string[];
+  appRoutes: string[]; // every frontend route scanned in the checkout (src/lib/routes.ts), [param] kept
+  sha: string; // checkout it was read at
+  at: string;
+  incomplete?: string; // the session failed / was skipped: routes only (a re-run of stories / flows reads again)
+}
+
+export interface PieceCheck {
+  ok: number;
+  fixed: number;
+  flagged: number;
+  unsure?: number;
+  at: string;
+  sha?: string;
+  note?: string; // e.g. "no codebase — routes not checked"
+  // build mode: what the checker found wrong without a one-field fix (understand logs issues instead)
+  flags?: { kind: "story" | "criterion" | "node" | "edgeCase"; id: string; why: string; evidence?: string }[];
+}
+
+export interface SchemaFocus {
+  tables: { id: string; role: string }[]; // schema-qualified, most central first
+  sig: string; // replay signature it was picked against
+  at: string;
 }
 
 // Written by the intake session once the feature is clear.
@@ -276,14 +332,17 @@ export interface Brief {
   outOfScope: string[];
   decisions: { q: string; a: string }[];
   openQuestions: string[];
-  surfaces: string[]; // screens/routes/tables/services touched (grounded in the code)
-  pieces: { title: string; why: string; scope: string[] }[]; // 1..5, ordered
+  surfaces: string[]; // screens/routes/tables/services touched (grounded in the code); understand: where it lives today
+  pieces: { title: string; why: string; scope: string[] }[]; // 1..5, ordered; understand: sub-areas in reading order
 }
 
 export interface IntakeState {
   sessionId?: string;
-  worktree?: string;
-  mainSha?: string;
+  worktree?: string; // the checkout the session ran in
+  featureDir?: string; // build: the feature's own checkout dir (kept for removal; worktree may be cleared)
+  mainSha?: string; // sha that checkout held when the session read it
+  baseSha?: string; // build: the commit the feature's own checkout is pinned at (set once; refresh moves it)
+  baseRef?: string; // the base it came from, e.g. origin/<branch> or main (display)
   status: "idle" | "thinking" | "asking" | "ready" | "error";
   error?: string;
 }
@@ -294,6 +353,7 @@ export interface Feature {
   brief: string; // text (= briefDoc.summary once the intake settles)
   briefDoc?: Brief; // the structured brief from the intake conversation
   phase: FeaturePhase;
+  mode?: FeatureMode; // absent = "build" (pre-mode data); fixed at creation
   status: FeatureStatus;
   createdAt: string;
   updatedAt: string;
@@ -306,6 +366,34 @@ export interface Feature {
   contextDismissed?: { kind: ContextRef["kind"]; title: string; url?: string }[];
   chat?: ChatMessage[]; // the ONE thread (intake + edits)
   chatUndo?: ChatUndo;
+  // understand: what to fix / extend, collected until a build starts from them (src/lib/issues.ts)
+  issues?: Issue[];
+  builds?: { featureId: string; issueIds: string[]; at: string }[]; // build features started from issues
+  // build: the understand feature (and its issues) this one was started from
+  fromFeature?: string;
+  issueIds?: string[];
+}
+
+export type IssueKind = "bug" | "improvement" | "question";
+export type IssueStatus = "open" | "in build" | "dropped";
+export type IssueSource = "chat" | "intake" | "manual" | "pin" | "verify" | "check";
+// what an issue was flagged on: a story, flow node / edge case, mockup mark, schema table or verify run
+export interface IssueRef {
+  tab: "stories" | "flows" | "sketch" | "schema" | "verify";
+  id: string;
+  label: string;
+}
+export interface Issue {
+  id: string; // "is_xxx"
+  title: string; // <= 10 words
+  detail?: string;
+  kind: IssueKind;
+  status: IssueStatus;
+  source: IssueSource;
+  ref?: IssueRef;
+  pieceId?: string;
+  createdAt: string;
+  build?: string; // the build feature it went into
 }
 
 // Projection of one piece onto a Feature-shaped object (src/lib/pieces.ts pieceView): tabs, generators
@@ -328,6 +416,8 @@ export interface Settings {
   envPath: string; // BYOK source, e.g. ~/code/my-app/.env ("" = process env)
   frontendUrl: string; // the real app we sketch over + test against
   repoPath: string; // where claude code runs for builds/tests
+  edgeCases?: boolean; // flowchart edge cases (unhappy paths pinned to nodes); false = never drawn or shown. absent = on
+  baseBranch: string; // branch lambda reads code from, e.g. <remote>/<branch> (fetched first); "" = auto (main / master)
   model: string;
   accounts: TestAccount[];
   migrationsDir: string; // default "migrations"
@@ -335,4 +425,81 @@ export interface Settings {
   appHosts: string[]; // host fragments that are "our" API (queue urls to these are internal), e.g. ["myapp"]
   baselineSchemaPath: string; // default "" (pg_dump --schema-only file; optional)
   queueIgnore: string[]; // default ["node_modules",".git",".next","venv",".venv","dist","build","__pycache__"]
+}
+
+// ---------- local stack (lambda's own copy of the app: frontend + api + queue emulator) ----------
+
+export type StackRole = "frontend" | "api" | "queue" | "worker" | "other";
+
+// cmd: argv array, or one shell line (shell: true) only when it needs `source` / `&&`. cwd relative to the
+// repo root. Placeholders (cmd, env, setup): ${port} ${url} (own), ${port.<extra>}, ${port:<svc>},
+// ${port:<svc>.<extra>}, ${url:<svc>}, ${repo} (the developer's checkout), ${worktree} (lambda's).
+export interface StackService {
+  name: string;
+  cwd: string;
+  cmd: string[] | string;
+  shell?: boolean;
+  port?: { env?: string; arg?: string }; // inject the allocated port as env var / append `arg <port>`
+  extraPorts?: string[]; // more ports this service binds (e.g. qstash's log server)
+  ready?: { path?: string; status?: number; log?: string; timeoutSec?: number };
+  role: StackRole;
+  optional?: boolean; // not started unless asked for by name
+}
+
+export interface StackSetup {
+  name: string;
+  cwd: string;
+  cmd: string[] | string;
+  shell?: boolean;
+  skipIf?: string; // path (relative to cwd) that, when it exists, means the step already ran
+}
+
+export interface StackPlan {
+  services: StackService[];
+  setup: StackSetup[];
+  env: Record<string, Record<string, string>>; // service -> KEY -> value (placeholders allowed)
+  envFiles: string[]; // gitignored env files to copy from the developer's checkout (relative)
+  notes: string[];
+}
+
+export interface StackPlanRecord {
+  repoPath: string; // realpath of the repo the plan is for
+  plan?: StackPlan;
+  approved: boolean; // only true while approvedHash matches the stored plan (getPlanRecord enforces it)
+  approvedHash?: string; // planHash() of the exact plan the developer approved
+  source?: "claude" | "edited";
+  sha?: string; // checkout the plan was read from
+  createdAt: string;
+  updatedAt: string;
+  planError?: string;
+}
+
+export type StackServiceStatus = "stopped" | "starting" | "ready" | "crashed" | "error";
+
+export interface StackServiceState {
+  name: string;
+  role: StackRole;
+  port?: number;
+  extraPorts?: Record<string, number>;
+  url?: string;
+  pid?: number; // = process group id (spawned detached)
+  status: StackServiceStatus;
+  startedAt?: string;
+  readyAt?: string;
+  exitCode?: number | null;
+  error?: string;
+}
+
+export interface StackState {
+  key: string;
+  worktree: string;
+  repoPath: string;
+  ownerPid: number; // the lambda server process that spawned it
+  status: "stopped" | "setup" | "starting" | "ready" | "partial" | "error";
+  services: StackServiceState[];
+  features: string[]; // features that asked for it (info + idle accounting)
+  lastUsedAt: string;
+  setupPid?: number; // pgid of a running setup step (for the reaper / watchdog)
+  error?: string;
+  foreign?: boolean; // owned by another live lambda process (installed app vs dev server): read-only here
 }

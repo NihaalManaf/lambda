@@ -3,14 +3,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { featurePrompt, generate } from "./llm";
+import { clamp, pad, placeInsert, placeMove } from "./placement";
 import { SHOTS_DIR, id } from "./store";
-import type { Annotation, Box, FeatureView, Mockup } from "./types";
+import { featureMode, type Annotation, type Box, type FeatureView, type Mockup } from "./types";
 
 // Plan marker annotations over a real screenshot. The model points at numbered DOM boxes;
 // we turn idx -> pixel boxes here. Raw model coordinates are a last resort.
 
 const Pos = z.enum(["above", "below", "left", "right", "inside", "over"]);
-type Pos = z.infer<typeof Pos>;
 
 const Plan = z.object({
   annotations: z
@@ -42,7 +42,19 @@ Not a redesign. Show only WHERE things change:
 - change-text: copy changes (newText = the new copy, short)
 - restyle: same thing, different look
 - note: a question / edge case pinned to an element
-Point at the numbered boxes drawn on the image. Labels <= 6 words. Never annotate unrelated areas.
+Point at the numbered boxes drawn on the image. Labels <= 6 words.
+Elements marked (floating) are fixed overlays (fab, chat bubble, toast) sitting on top of the page: never anchor an
+insert or move on one. To change a floating control itself, use restyle / change-text / note on it. Never annotate unrelated areas.
+Never quote data values from the page (names, emails, numbers) in labels or details.
+`.trim();
+
+// understand: explain the existing ui, never change it. only notes survive (coerced below).
+const SYSTEM_UNDERSTAND = `
+You annotate a screenshot of the developer's REAL running web app with a sharpie, to explain an EXISTING feature.
+Use ONLY kind "note": pin one on each element that belongs to the feature —
+label = what it does / what it triggers (<= 6 words); detail = where it's handled (route / component) only if known.
+Point at the numbered boxes drawn on the image. Never annotate unrelated areas.
+Elements marked (floating) are fixed overlays (fab, chat bubble, toast); note them only if they belong to the feature.
 Never quote data values from the page (names, emails, numbers) in labels or details.
 `.trim();
 
@@ -70,13 +82,14 @@ export async function planSketch(
 ): Promise<Annotation[]> {
   const els = mockup.elements;
   const list = els
-    .map((e) => `${e.idx} ${e.tag}${e.role ? `[${e.role}]` : ""} "${e.text}" @${e.x},${e.y} ${e.w}x${e.h}`)
+    .map((e) => `${e.idx} ${e.tag}${e.role ? `[${e.role}]` : ""}${e.floating ? " (floating)" : ""} "${e.text}" @${e.x},${e.y} ${e.w}x${e.h}`)
     .join("\n");
 
   const tiles = await markedTiles(mockup);
+  const understand = featureMode(feature) === "understand";
   const prompt = `${featurePrompt(feature)}
 
-what changes on this screen: ${intent || "(infer from the feature)"}${opts.context ? `\n${opts.context}` : ""}
+${understand ? "what this screen shows of the feature" : "what changes on this screen"}: ${intent || "(infer from the feature)"}${opts.context ? `\n${opts.context}` : ""}
 
 page: ${mockup.title} — ${mockup.url}
 screenshot: ${mockup.width}x${mockup.height}px, sent as ${tiles.length} vertical tile(s) top→bottom${
@@ -88,20 +101,25 @@ ${list || "(none found — use box)"}`;
 
   const plan = await generate({
     schema: Plan,
-    system: SYSTEM,
+    system: understand ? SYSTEM_UNDERSTAND : SYSTEM,
     prompt,
     images: tiles.map(({ mediaType, base64 }) => ({ mediaType, base64 })),
     effort: "medium",
     signal: opts.signal,
+    mode: featureMode(feature),
   });
+  // understand never proposes ui: anything but a note becomes a note on the same element
+  if (understand) for (const a of plan.annotations) if (a.kind !== "note") Object.assign(a, { kind: "note", position: "over", toIdx: null, newText: null });
 
   const byIdx = new Map(els.map((e) => [e.idx, e]));
   const bounds = { w: mockup.width, h: mockup.height };
+  const flow = els.filter((e) => !e.floating); // what new ui has to fit between
   const out: Annotation[] = [];
   for (const a of plan.annotations.slice(0, 10)) {
     const el = a.idx != null ? byIdx.get(a.idx) : undefined;
     let box: Box | undefined;
-    if (el) box = a.kind === "insert" ? place(el, a.position, bounds) : pad(el, 4, bounds);
+    // an insert on a floating widget would land on whatever is under it: mark the widget itself
+    if (el) box = a.kind === "insert" && !el.floating ? placeInsert(el, a.position, bounds, flow) : pad(el, 4, bounds);
     else if (a.box) box = clamp(a.box, bounds);
     if (!box) continue;
 
@@ -110,52 +128,12 @@ ${list || "(none found — use box)"}`;
     if (a.kind === "change-text" && a.newText) ann.newText = a.newText.slice(0, 80);
     if (a.kind === "move") {
       const to = a.toIdx != null ? byIdx.get(a.toIdx) : undefined;
-      ann.to = to ? place(to, a.toPosition ?? "below", bounds, box) : clamp({ ...box, y: box.y + box.h + 40 }, bounds);
+      ann.to = to ? placeMove(to, a.toPosition ?? "below", bounds, box) : clamp({ ...box, y: box.y + box.h + 40 }, bounds);
     }
     if (out.some((o) => isDup(o, ann))) continue;
     out.push(ann);
   }
   return out;
-}
-
-// ---------- geometry ----------
-
-function clamp(b: Box, { w, h }: { w: number; h: number }): Box {
-  const x = Math.max(0, Math.min(b.x, w - 20));
-  const y = Math.max(0, Math.min(b.y, h - 20));
-  return {
-    x: Math.round(x),
-    y: Math.round(y),
-    w: Math.round(Math.max(20, Math.min(b.w, w - x))),
-    h: Math.round(Math.max(20, Math.min(b.h, h - y))),
-  };
-}
-
-const pad = (b: Box, p: number, bounds: { w: number; h: number }) =>
-  clamp({ x: b.x - p, y: b.y - p, w: b.w + 2 * p, h: b.h + 2 * p }, bounds);
-
-// A box adjacent to `anchor` for new ui (or a move target sized like `size`).
-export function place(anchor: Box, pos: Pos, bounds: { w: number; h: number }, size?: Box): Box {
-  const gap = 14;
-  const h = size?.h ?? Math.min(Math.max(anchor.h, 56), 140);
-  const w = size?.w ?? Math.min(Math.max(anchor.w, 120), 520);
-  switch (pos) {
-    case "above":
-      return clamp({ x: anchor.x, y: anchor.y - h - gap, w: size ? w : anchor.w, h }, bounds);
-    case "below":
-      return clamp({ x: anchor.x, y: anchor.y + anchor.h + gap, w: size ? w : anchor.w, h }, bounds);
-    case "left":
-      return clamp({ x: anchor.x - w - gap, y: anchor.y, w, h: size ? h : anchor.h }, bounds);
-    case "right":
-      return clamp({ x: anchor.x + anchor.w + gap, y: anchor.y, w, h: size ? h : anchor.h }, bounds);
-    case "inside": {
-      const iw = size ? Math.min(w, anchor.w * 0.9) : anchor.w * 0.76;
-      const ih = size ? Math.min(h, anchor.h * 0.9) : Math.min(anchor.h * 0.6, 200);
-      return clamp({ x: anchor.x + (anchor.w - iw) / 2, y: anchor.y + (anchor.h - ih) / 2, w: iw, h: ih }, bounds);
-    }
-    default:
-      return pad(anchor, 4, bounds);
-  }
 }
 
 // ---------- model image: screenshot + numbered boxes ("set of marks"), cut into tiles ----------

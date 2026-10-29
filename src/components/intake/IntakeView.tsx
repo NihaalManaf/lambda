@@ -8,8 +8,9 @@ import BriefCard from "@/components/brief/BriefCard";
 import Scribe from "@/components/Scribe";
 import { inline } from "@/components/inline";
 import { visibleText, type Ask } from "@/lib/intake-parse";
-import type { ChatMessage, Feature, FeatureView } from "@/lib/types";
+import { featureMode, type ChatMessage, type Feature, type FeatureMode, type FeatureView } from "@/lib/types";
 import { useIntake } from "./useIntake";
+import StackPill from "@/components/stack/StackPill";
 
 // The intake conversation: a Claude Code session on the repo's main branch asks what's unclear, then writes
 // the brief. Calm, centred column; lambda's turns are plain text, questions are chips, the live trace is
@@ -18,6 +19,28 @@ import { useIntake } from "./useIntake";
 type AnyFeature = Feature | FeatureView;
 const ease = [0.23, 1, 0.32, 1] as const;
 const HANDOFF_MS = 2400;
+
+// per-mode copy: understand walks through an existing feature (areas), build shapes a new one (pieces)
+const COPY: Record<FeatureMode, { eyebrow: string; noRepo: string; settling: (n: number) => string; writing: string; skip: string; skipping: string; skipFailed: string }> = {
+  build: {
+    eyebrow: "new feature · talking it through",
+    noRepo: "no repo set — questions won't see the code",
+    settling: (n) => `shaping ${n > 1 ? `${n} pieces` : "it"} — stories, flows, edge cases`,
+    writing: "writing the brief",
+    skip: "skip — just shape it",
+    skipping: "shaping…",
+    skipFailed: "couldn't shape it",
+  },
+  understand: {
+    eyebrow: "existing feature · walking through it",
+    noRepo: "no repo set — lambda can't read the implementation",
+    settling: (n) => `mapping ${n > 1 ? `${n} areas` : "it"} — stories, flows, edge cases`,
+    writing: "writing the walkthrough",
+    skip: "skip — just map it",
+    skipping: "mapping…",
+    skipFailed: "couldn't map it",
+  },
+};
 const started = new Set<string>(); // opener sent (strict-mode double mount, remounts)
 
 export default function IntakeView({
@@ -30,7 +53,10 @@ export default function IntakeView({
   onDone?: (f: AnyFeature) => void;
 }) {
   const reduce = useReducedMotion();
-  const { pending, busy, send, stop, skip, skipping, skipError, brief, settled, dismiss, repo } = useIntake(feature, onChange);
+  const { pending, busy, send, stop, skip, skipping, skipError, brief, settled, dismiss, repo, base, refresh, refreshing, refreshNote } = useIntake(
+    feature,
+    onChange,
+  );
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -74,7 +100,7 @@ export default function IntakeView({
     if (pinned.current) window.scrollTo({ top: document.documentElement.scrollHeight });
   });
 
-  const submit = (text = draft) => {
+  const submit = (text: string) => {
     if (!text.trim() || busy || brief) return;
     void send(text);
     setDraft("");
@@ -85,16 +111,28 @@ export default function IntakeView({
   // the open questions = the ask turns after the last developer turn
   const lastUser = turns.map((t) => t.role).lastIndexOf("user");
   const openAsks = busy || brief ? [] : turns.slice(lastUser + 1).filter((t) => t.ask);
+
+  // chip picks live here (not in AskGroup) so chips + typed text go out as ONE message, whichever sends
+  const asks = openAsks.map((t) => t.ask!);
+  const askKey = openAsks[0]?.id ?? "";
+  const [picks, setPicks] = useState<{ key: string; sel: string[][] }>({ key: "", sel: [] });
+  const picked = picks.key === askKey ? picks.sel : asks.map(() => []);
+  const setPicked = (sel: string[][]) => setPicks({ key: askKey, sel });
+  const answer = (sel = picked) =>
+    submit([...pickLines(asks, sel), draft.trim()].filter(Boolean).join("\n"));
   const lastErrorTurn = [...turns].reverse().find((t) => t.role === "assistant");
   const retryText = lastErrorTurn?.error && lastErrorTurn.error !== "stopped" && !busy ? turns[lastUser]?.text : undefined;
-  const sha = feature.intake?.mainSha?.slice(0, 7);
+  const sha = (feature.intake?.baseSha ?? feature.intake?.mainSha)?.slice(0, 7);
   const firstTurn = !turns.length && !!pending && !pending.text;
+  const mode = featureMode(feature);
+  const copy = COPY[mode];
 
   return (
     <div className="mx-auto flex min-h-[calc(100dvh-57px)] w-full max-w-[680px] flex-col px-4 pt-10 md:px-5 md:pt-14">
       <header className="mb-8">
         <div className="flex items-center gap-3">
-          <p className="eyebrow">new feature · talking it through</p>
+          <p className="eyebrow">{copy.eyebrow}</p>
+          <StackPill featureId={feature.id} compact />
         </div>
         <h1 className="display mt-3 text-[40px] text-ink md:text-[52px]">{feature.title}</h1>
         <p className="mt-3 font-mono text-[11.5px] text-grey">
@@ -102,11 +140,34 @@ export default function IntakeView({
             " "
           ) : repo ? (
             <>
-              reading {repo} @ main{sha ? <span className="text-grey/70"> · {sha}</span> : null} · read-only
+              reading {repo} @ {feature.intake?.baseRef ?? base ?? "auto"}
+              {sha ? <span className="text-grey/70"> · {sha}</span> : null} · read-only
+              {mode === "build" && feature.intake?.baseSha && !busy ? (
+                <>
+                  {" "}
+                  ·{" "}
+                  <button
+                    type="button"
+                    onClick={() => void refresh()}
+                    disabled={refreshing}
+                    title="move this feature's checkout to the latest base"
+                    className="underline decoration-line-2 underline-offset-2 hover:text-ink disabled:no-underline disabled:opacity-60"
+                  >
+                    {refreshing ? "refreshing…" : "refresh"}
+                  </button>
+                  {refreshNote && !refreshing ? (
+                    <span className={refreshNote.error ? "text-bad" : "text-grey/70"} title={refreshNote.text}>
+                      {" "}
+                      · {refreshNote.error && refreshNote.text.length > 60 ? "couldn't refresh" : refreshNote.text}
+                    </span>
+                  ) : null}
+                </>
+              ) : null}
             </>
           ) : (
             <>
-              no repo set — questions won&apos;t see the code ·{" "}
+              {copy.noRepo}{" "}
+              ·{" "}
               <Link href="/settings" className="underline decoration-line-2 underline-offset-2 hover:text-ink">
                 settings
               </Link>
@@ -125,7 +186,7 @@ export default function IntakeView({
           ))}
         {openAsks.length > 0 && (
           <li>
-            <AskGroup key={openAsks[0].id} asks={openAsks.map((t) => t.ask!)} onSend={submit} />
+            <AskGroup key={askKey} asks={asks} picked={picked} onPick={setPicked} onSend={answer} typed={!!draft.trim()} />
           </li>
         )}
         {retryText && (
@@ -157,13 +218,11 @@ export default function IntakeView({
               transition={reduce ? { duration: 0.2 } : { type: "spring", duration: 0.55, bounce: 0.12 }}
               className="mt-2"
             >
-              <BriefCard brief={brief} compact />
+              <BriefCard brief={brief} compact mode={mode} />
               <div className="mt-4 flex items-center justify-between gap-3">
                 <span className="flex items-center gap-2 font-mono text-[11.5px] text-grey">
                   <Dots />
-                  {settled
-                    ? `shaping ${brief.pieces.length > 1 ? `${brief.pieces.length} pieces` : "it"} — stories, flows, edge cases`
-                    : "writing the brief"}
+                  {settled ? copy.settling(brief.pieces.length) : copy.writing}
                 </span>
                 <button type="button" onClick={handOff} disabled={!settled} className="btn btn-primary !py-2 text-[13px]">
                   open workspace →
@@ -180,7 +239,8 @@ export default function IntakeView({
             inputRef={inputRef}
             value={draft}
             onChange={setDraft}
-            onSubmit={() => submit()}
+            onSubmit={() => answer()}
+            canSend={!!draft.trim() || picked.some((p) => p.length)}
             busy={busy}
             onStop={stop}
           />
@@ -191,11 +251,11 @@ export default function IntakeView({
               disabled={skipping}
               className="rounded-full px-2.5 py-1 text-[12.5px] text-grey transition-[transform,color,background-color] duration-150 hover:bg-paper-2 hover:text-ink active:scale-[0.97] disabled:opacity-50"
             >
-              {skipping ? "shaping…" : "skip — just shape it"}
+              {skipping ? copy.skipping : copy.skip}
             </button>
             {skipError ? (
               <span className="truncate text-[12px] text-bad" title={skipError}>
-                {skipError.length > 60 ? "couldn't shape it" : skipError}
+                {skipError.length > 60 ? copy.skipFailed : skipError}
               </span>
             ) : (
               <span className="hidden font-mono text-[10.5px] text-grey/80 sm:inline">enter send · shift+enter newline · “go” when it&apos;s clear</span>
@@ -310,18 +370,29 @@ function Live({
 
 // ---------- questions as chips ----------
 
-function AskGroup({ asks, onSend }: { asks: Ask[]; onSend: (text: string) => void }) {
-  const [picked, setPicked] = useState<string[][]>(() => asks.map(() => []));
-  const instant = asks.length === 1 && !asks[0].multi; // one single-choice question: a click answers it
+// picked chips as message lines: "q → a, b" (just "a, b" for a lone question)
+function pickLines(asks: Ask[], picked: string[][]): string[] {
+  return asks.flatMap((a, i) => (picked[i]?.length ? [asks.length === 1 ? picked[i].join(", ") : `${a.question} → ${picked[i].join(", ")}`] : []));
+}
+
+function AskGroup({
+  asks,
+  picked,
+  onPick,
+  onSend,
+  typed,
+}: {
+  asks: Ask[];
+  picked: string[][];
+  onPick: (picked: string[][]) => void;
+  onSend: (picked?: string[][]) => void; // sends picks + whatever is typed in the composer
+  typed: boolean;
+}) {
+  // one single-choice question and nothing typed: a click answers it. with typed text the click only selects
+  const instant = asks.length === 1 && !asks[0].multi && !typed;
   const toggle = (qi: number, opt: string) => {
-    if (instant) return onSend(opt);
-    setPicked((cur) =>
-      cur.map((sel, i) => (i !== qi ? sel : asks[qi].multi ? (sel.includes(opt) ? sel.filter((x) => x !== opt) : [...sel, opt]) : sel[0] === opt ? [] : [opt])),
-    );
-  };
-  const answer = () => {
-    const lines = asks.flatMap((a, i) => (picked[i].length ? [asks.length === 1 ? picked[i].join(", ") : `${a.question} → ${picked[i].join(", ")}`] : []));
-    if (lines.length) onSend(lines.join("\n"));
+    if (instant) return onSend([[opt]]);
+    onPick(picked.map((sel, i) => (i !== qi ? sel : asks[qi].multi ? (sel.includes(opt) ? sel.filter((x) => x !== opt) : [...sel, opt]) : sel[0] === opt ? [] : [opt])));
   };
   const any = picked.some((p) => p.length);
 
@@ -366,7 +437,7 @@ function AskGroup({ asks, onSend }: { asks: Ask[]; onSend: (text: string) => voi
       ))}
       {!instant && (
         <div>
-          <button type="button" onClick={answer} disabled={!any} className="btn btn-primary !px-3.5 !py-1.5 text-[13px]">
+          <button type="button" onClick={() => onSend()} disabled={!any} className="btn btn-primary !px-3.5 !py-1.5 text-[13px]">
             send answers
           </button>
         </div>
@@ -392,6 +463,7 @@ function Composer({
   value,
   onChange,
   onSubmit,
+  canSend,
   busy,
   onStop,
 }: {
@@ -399,6 +471,7 @@ function Composer({
   value: string;
   onChange: (v: string) => void;
   onSubmit: () => void;
+  canSend: boolean; // typed text or picked chips
   busy: boolean;
   onStop: () => void;
 }) {
@@ -445,7 +518,7 @@ function Composer({
       ) : (
         <button
           type="submit"
-          disabled={!value.trim()}
+          disabled={!canSend}
           aria-label="send (enter)"
           className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-ink text-paper transition-[transform,opacity] duration-150 active:scale-[0.94] disabled:opacity-25"
         >

@@ -133,7 +133,7 @@ export default function SketchCanvas(p: CanvasProps) {
     () => p.annotations.map((a) => (drag?.id === a.id ? applyDrag(a, drag, m.width, m.height) : a)),
     [p.annotations, drag, m.width, m.height],
   );
-  const narrow = cw > 0 && cw < NARROW;
+  const narrow = cw > 0 && cw < NARROW && cw < m.width * 0.75; // shown well below capture size (a phone shot at its own width isn't)
   const cropped = narrow && !full && p.annotations.length > 0;
   // crop follows committed boxes only, so it doesn't jump mid-drag
   const view = useMemo(

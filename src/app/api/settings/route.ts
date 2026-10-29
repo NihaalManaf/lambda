@@ -4,6 +4,7 @@ import type { Settings, TestAccount } from "@/lib/types";
 import { clearAuth, loginOriginChanged } from "@/lib/auth";
 import { MODELS } from "@/components/settings/types";
 import { settingsView as view } from "@/components/settings/view";
+import { validBaseBranch } from "@/lib/baseref";
 
 export async function GET() {
   return NextResponse.json(view(getSettings()));
@@ -22,6 +23,10 @@ export async function PUT(req: Request) {
     const v = str(body[k], 1000);
     if (v !== undefined) patch[k] = v;
   }
+  // ends up in git argv: a bad ref is never saved (the rest of the patch is); the form sees the returned
+  // baseBranch differ from what it sent and marks the field
+  const base = str(body.baseBranch, 200);
+  if (base !== undefined && (base === "" || validBaseBranch(base))) patch.baseBranch = base;
   for (const k of ["migrationsDir", "baselineSchemaPath"] as const) {
     const v = str(body[k], 1000);
     if (v !== undefined) patch[k] = v;
@@ -30,6 +35,7 @@ export async function PUT(req: Request) {
     if (Array.isArray(body[k]))
       patch[k] = (body[k] as unknown[]).map((x) => str(x, 300)).filter((x): x is string => !!x).slice(0, 50);
   if (typeof body.model === "string" && MODELS.includes(body.model)) patch.model = body.model;
+  if (typeof body.edgeCases === "boolean") patch.edgeCases = body.edgeCases;
   if (Array.isArray(body.accounts)) {
     patch.accounts = (body.accounts as Record<string, unknown>[]).slice(0, 50).map((a) => {
       const aid = typeof a.id === "string" && /^acct_[\w-]{1,40}$/.test(a.id) ? a.id : id("acct");

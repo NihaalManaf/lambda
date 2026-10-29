@@ -18,7 +18,8 @@ export async function GET(req: Request, { params }: Ctx) {
 }
 
 // POST {kinds?, pieceId?} -> pieceView with the jobs queued. No kinds = everything (context → every piece:
-// stories ∥ flows ∥ needs → schema/queues; with pieceId only that piece). Piece kinds go to pieceId or the first piece.
+// facts → stories ∥ flows ∥ needs (→ schema/queues) → check, sketch after stories; with pieceId only that piece).
+// Piece kinds go to pieceId or the first piece; stories / flows add facts (when missing) and check themselves.
 export async function POST(req: Request, { params }: Ctx) {
   const fid = (await params).id;
   const b = (await req.json().catch(() => ({}))) as { kinds?: unknown; pieceId?: unknown };

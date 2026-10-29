@@ -17,7 +17,7 @@ export type StoryOp =
   | { op: "remove_criterion"; storyId: string; criterionId: string };
 
 export type FlowOp =
-  | { op: "rename_node"; setId: string; chartId: string; nodeId: string; label: string }
+  | { op: "rename_node"; setId: string; chartId: string; nodeId: string; label: string; keepDescription?: boolean } // check fixes keep it
   | { op: "set_node_kind"; setId: string; chartId: string; nodeId: string; kind: FlowNodeKind }
   | { op: "add_node"; setId: string; chartId: string; label: string; kind: FlowNodeKind; after?: string; edgeLabel?: string }
   | { op: "remove_node"; setId: string; chartId: string; nodeId: string } // reconnects in→out edges
@@ -26,6 +26,7 @@ export type FlowOp =
   | { op: "remove_edge"; setId: string; chartId: string; edgeId: string }
   | { op: "add_edge_case"; setId: string; chartId: string; nodeId: string; text: string }
   | { op: "remove_edge_case"; setId: string; chartId: string; edgeCaseId: string }
+  | { op: "update_edge_case"; setId: string; chartId: string; edgeCaseId: string; text: string } // keeps handled
   | { op: "refine_chart"; setId: string; chartId: string; instruction: string } // LLM rewrite of one chart
   | { op: "draw_lens"; lens: FlowLens; focus?: string }; // generate a new set
 
@@ -39,9 +40,9 @@ export type FeatureOp = StoryOp | FlowOp | ContextOp | { op: "update_brief"; bri
 // What the chat shows as a compact change card ("+ story", "~ node", "− edge case").
 export interface ChangeNote {
   sign: "+" | "~" | "−";
-  what: "story" | "criterion" | "piece" | "node" | "edge" | "edge case" | "chart" | "flow set" | "context" | "brief" | "title";
+  what: "story" | "criterion" | "piece" | "node" | "edge" | "edge case" | "chart" | "flow set" | "context" | "brief" | "title" | "issue";
   label: string; // <= 6 words
-  tab: "stories" | "flows" | "context" | "overview";
+  tab: "stories" | "flows" | "context" | "overview" | "issues";
   ref?: string; // id to highlight/scroll to
   scope?: string; // container of ref when ref ids aren't globally unique (flow node/edge ids are per chart → chart id)
   piece?: string; // piece id the change landed in (feature-level changes: none)

@@ -13,6 +13,7 @@ const newId = () => `acct_${crypto.randomUUID().replace(/-/g, "").slice(0, 10)}`
 export default function SettingsForm({ initial }: { initial: SettingsView }) {
   const [s, setS] = useState(initial);
   const [save, setSave] = useState<SaveState>("idle");
+  const [badBase, setBadBase] = useState(false); // the server refused the base branch (not a valid ref)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Autosave: debounce, PUT, then merge only server-owned bits (key dots, hasPassword) back in.
@@ -31,6 +32,9 @@ export default function SettingsForm({ initial }: { initial: SettingsView }) {
         });
         if (!res.ok) throw new Error();
         const v = (await res.json()) as SettingsView;
+        // an invalid ref is dropped server-side, never saved: say so instead of a green "saved"
+        const rejected = (next.baseBranch ?? "").trim() !== (v.baseBranch ?? "");
+        setBadBase(rejected);
         setS((cur) => ({
           ...cur,
           keys: v.keys,
@@ -39,6 +43,7 @@ export default function SettingsForm({ initial }: { initial: SettingsView }) {
             hasPassword: v.accounts.find((x) => x.id === a.id)?.hasPassword ?? a.hasPassword,
           })),
         }));
+        if (rejected) return setSave("error");
         setSave("saved");
         setTimeout(() => setSave((x) => (x === "saved" ? "idle" : x)), 1600);
       } catch {
@@ -83,6 +88,19 @@ export default function SettingsForm({ initial }: { initial: SettingsView }) {
             <input className="input font-mono" value={s.repoPath} onChange={(e) => set("repoPath", e.target.value)} />
           </Field>
         </div>
+        <Field label="base branch" className="mt-4">
+          <input
+            className="input font-mono"
+            placeholder="auto · main / master"
+            value={s.baseBranch ?? ""}
+            onChange={(e) => set("baseBranch", e.target.value)}
+          />
+        </Field>
+        {badBase ? (
+          <p className="mt-2 font-mono text-[11px] text-bad">not a valid branch name — not saved</p>
+        ) : (
+          <p className="mt-2 font-mono text-[11px] text-grey">branch lambda reads from, e.g. origin/staging · remote refs fetched first · empty = auto</p>
+        )}
         <Field label="model" className="mt-4">
           <div className="inline-flex rounded-full border border-line-2 bg-card p-1">
             {MODELS.map((m) => (
@@ -99,6 +117,23 @@ export default function SettingsForm({ initial }: { initial: SettingsView }) {
             ))}
           </div>
         </Field>
+        <Field label="edge cases" className="mt-4">
+          <div className="inline-flex rounded-full border border-line-2 bg-card p-1">
+            {([true, false] as const).map((on) => (
+              <button
+                key={String(on)}
+                onClick={() => set("edgeCases", on)}
+                className={`relative rounded-full px-3.5 py-1.5 font-mono text-[12px] transition-colors ${(s.edgeCases !== false) === on ? "text-paper" : "text-ink-2 hover:text-ink"}`}
+              >
+                {(s.edgeCases !== false) === on && (
+                  <motion.span layoutId="edge-pill" className="absolute inset-0 rounded-full bg-ink" transition={spring} />
+                )}
+                <span className="relative">{on ? "on" : "off"}</span>
+              </button>
+            ))}
+          </div>
+        </Field>
+        <p className="mt-2 font-mono text-[11px] text-grey">unhappy paths pinned to flowchart nodes · off = not drawn, hidden on existing charts</p>
       </Section>
 
       <Section eyebrow="03 · schema + queues" title="where tables + queues come from" aside="migrations replayed in order">

@@ -20,10 +20,12 @@ export async function GET(_: Request, { params }: Ctx) {
 export async function POST(req: Request, { params }: Ctx) {
   const fid = (await params).id;
   if (!getFeature(fid)) return NextResponse.json({ error: "not found" }, { status: 404 });
-  const body = (await req.json().catch(() => null)) as { text?: unknown; pieceId?: unknown } | null;
+  const body = (await req.json().catch(() => null)) as { text?: unknown; pieceId?: unknown; view?: { table?: unknown } } | null;
   const pid = pieceIdFrom(req.url, body);
   const text = typeof body?.text === "string" ? body.text.trim().slice(0, 4000) : "";
   if (!text) return NextResponse.json({ error: "text required" }, { status: 400 });
+  const table = body?.view?.table;
+  const view = typeof table === "string" && /^[\w.]{1,128}$/.test(table) ? { table } : undefined;
   if (busy.has(fid)) return NextResponse.json({ error: "lambda is still answering" }, { status: 409 });
   busy.add(fid);
 
@@ -43,7 +45,7 @@ export async function POST(req: Request, { params }: Ctx) {
         }
       };
       try {
-        await runChat(fid, text, emit, abort.signal, pid);
+        await runChat(fid, text, emit, abort.signal, pid, view);
       } catch (e) {
         emit({ type: "error", message: e instanceof Error ? e.message : String(e) });
       } finally {

@@ -24,6 +24,7 @@ import { Icon } from "./glyphs";
 import { layoutChart, type FlowNodeData } from "./layout";
 import { EditCtx, HoverCtx, nodeTypes } from "./nodes";
 import Popover from "./Popover";
+import FlagButton from "@/components/issues/FlagButton";
 
 // One small chart: editable canvas on the left, numbered edge cases on the right.
 // Click a node → popover (rename / kind / + step / + branch / + edge case / delete). Click an edge → label / delete.
@@ -137,6 +138,7 @@ function Chart({
   const [connecting, setConnecting] = useState(false);
   const [refining, setRefining] = useState(false);
   const [ask, setAsk] = useState("");
+  const [expanded, setExpanded] = useState(true);
 
   const layout = useMemo(() => layoutChart(chart), [chart]);
   const nodes = useGlide(layout.nodes, reduce);
@@ -206,13 +208,33 @@ function Chart({
     <HoverCtx.Provider value={{ hover, setHover }}>
       <EditCtx.Provider value={{ selected, connecting }}>
         <div id={`chart-${chart.id}`} className="card relative scroll-mt-24 overflow-hidden">
-          <div className="flex items-center gap-3 border-b border-line py-2.5 pl-5 pr-2.5">
-            <span className="font-mono text-[11px] text-grey">
-              {String(index + 1).padStart(2, "0")}/{String(total).padStart(2, "0")}
-            </span>
-            <h3 className="display truncate text-2xl">{chart.title}</h3>
-            <span className="hidden min-w-0 flex-1 truncate text-[13px] text-grey lg:block">{chart.summary}</span>
-            <div className="ml-auto flex shrink-0 items-center gap-0.5">
+          <div className={clsx("flex items-center gap-3 py-2.5 pl-5 pr-2.5", expanded && "border-b border-line")}>
+            <h3 className="min-w-0 flex-1">
+              <button
+                type="button"
+                aria-expanded={expanded}
+                aria-controls={`chart-body-${chart.id}`}
+                onClick={() => {
+                  setExpanded((v) => !v);
+                  setSelected(null);
+                  setEdgeAt(null);
+                  setHover(null);
+                  setConnecting(false);
+                }}
+                className="flex w-full min-w-0 items-center gap-3 rounded-sm text-left focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink"
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true" className={clsx("shrink-0 text-grey", expanded && "rotate-90")}>
+                  <path d="m5 3 4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span className="shrink-0 font-mono text-[11px] text-grey">
+                  {String(index + 1).padStart(2, "0")}/{String(total).padStart(2, "0")}
+                </span>
+                <span className="display truncate text-2xl">{chart.title}</span>
+                <span className="hidden min-w-0 flex-1 truncate text-[13px] text-grey lg:block">{chart.summary}</span>
+              </button>
+            </h3>
+            {busy && <span className="shrink-0 text-xs text-grey" role="status">redrawing…</span>}
+            <div className={clsx("ml-auto shrink-0 items-center gap-0.5", expanded ? "flex" : "hidden")}>
               <Tool on={refining} title="what's wrong? · redraw" onClick={() => setRefining((v) => !v)} disabled={busy}>
                 <Icon.wand />
               </Tool>
@@ -225,6 +247,21 @@ function Chart({
             </div>
           </div>
 
+          <div id={`chart-body-${chart.id}`} hidden={!expanded} className="relative">
+          {!!chart.schedules?.length && (
+            <div className="space-y-2 border-b border-line bg-paper-2/50 px-5 py-3 text-[13px]">
+              {chart.schedules.map((schedule, i) => (
+                <div key={`${schedule.nodeId}-${i}`} className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <span className="eyebrow">cron</span>
+                  <span className="font-semibold">{schedule.job}</span>
+                  <span>{schedule.timing}</span>
+                  <span className="text-grey">{schedule.timezone || "timezone not specified"}</span>
+                  {schedule.expression && <code className="rounded bg-card px-1.5 py-0.5 text-[11px]">{schedule.expression}</code>}
+                  {schedule.source && <span className="break-all text-xs text-grey">{schedule.source}</span>}
+                </div>
+              ))}
+            </div>
+          )}
           {/* one-line "what's wrong?" → model redraws only this chart */}
           <AnimatePresence initial={false}>
             {refining && (
@@ -353,6 +390,7 @@ function Chart({
               </motion.div>
             )}
           </AnimatePresence>
+          </div>
         </div>
 
         <AnimatePresence>
@@ -494,6 +532,12 @@ function EdgeCases({
               >
                 {ec.text}
               </span>
+              <FlagButton
+                refTo={{ tab: "flows", id: ec.id, label: ec.text.slice(0, 60) }}
+                title={ec.text}
+                label=""
+                className="mt-0.5 opacity-0 focus-visible:opacity-100 group-hover/ec:opacity-100 [@media(hover:none)]:opacity-100"
+              />
               <button
                 onClick={() => onRemove(ec.id)}
                 title="remove edge case"

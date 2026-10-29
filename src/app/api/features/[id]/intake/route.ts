@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { intakeLive, IntakeBusyError, isIntakeLive, runIntakeTurn, type IntakeEvent } from "@/lib/intake";
+import { baseNameFor, intakeLive, IntakeBusyError, isIntakeLive, runIntakeTurn, type IntakeEvent } from "@/lib/intake";
 import path from "node:path";
 import { getFeature, getSettings } from "@/lib/store";
 
@@ -9,12 +9,16 @@ export const maxDuration = 600;
 
 type Ctx = { params: Promise<{ id: string }> };
 
-// GET -> { live, trace?, text?, phase, status, repo } (repo = configured repo's folder name, or null) — lets a reloaded page pick up a turn still running
-export async function GET(_: Request, { params }: Ctx) {
+// GET -> { live, trace?, text?, phase, status, repo, base? } (repo = configured repo's folder name, or null;
+// base = the resolved base branch name, or null if none — only with ?base=1, it runs git) — lets a
+// reloaded page pick up a turn still running
+export async function GET(req: Request, { params }: Ctx) {
   const f = getFeature((await params).id);
   if (!f) return NextResponse.json({ error: "not found" }, { status: 404 });
-  const repoPath = getSettings().repoPath;
-  return NextResponse.json({ ...intakeLive(f.id), phase: f.phase, status: f.intake?.status ?? "idle", repo: repoPath ? path.basename(repoPath) : null });
+  const { repoPath } = getSettings();
+  const withBase = new URL(req.url).searchParams.get("base") === "1";
+  const base = withBase && repoPath ? await baseNameFor(repoPath).catch(() => null) : undefined;
+  return NextResponse.json({ ...intakeLive(f.id), phase: f.phase, status: f.intake?.status ?? "idle", repo: repoPath ? path.basename(repoPath) : null, ...(withBase ? { base: base ?? null } : {}) });
 }
 
 // POST {text} -> text/event-stream of IntakeEvent ("data: {json}\n\n"). The turn keeps running (and

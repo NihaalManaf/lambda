@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion } from "motion/react";
 import type { Annotation } from "@/lib/types";
+import FlagButton from "@/components/issues/FlagButton";
 import KindIcon from "./KindIcon";
 import { KINDS } from "./marks";
 
@@ -14,7 +15,9 @@ export default function AnnotationList(p: {
   onHover: (id: string | null) => void;
   onEdit: (a: Annotation) => void;
   onDelete: (id: string) => void;
+  kinds?: typeof KINDS; // understand: notes only, so no kind switcher
 }) {
+  const kinds = p.kinds ?? KINDS;
   if (!p.annotations.length)
     return <p className="font-hand text-lg text-grey">no marks yet — sketch it or draw a box.</p>;
 
@@ -34,11 +37,14 @@ export default function AnnotationList(p: {
               onMouseEnter={() => p.onHover(a.id)}
               className={`overflow-hidden rounded-xl border transition-colors ${open ? "border-ink bg-card" : "border-line bg-card/60 hover:border-line-2"}`}
             >
-              <button className="flex w-full items-center gap-2 px-3 py-2 text-left" onClick={() => p.onSelect(open ? null : a.id)}>
-                <span className="font-mono text-[11px] text-grey">{i + 1}</span>
-                <KindIcon kind={a.kind} />
-                <span className="truncate font-hand text-[17px] leading-tight">{a.newText && a.kind === "change-text" ? `→ ${a.newText}` : a.label}</span>
-              </button>
+              <div className="flex items-center pr-2">
+                <button className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left" onClick={() => p.onSelect(open ? null : a.id)}>
+                  <span className="font-mono text-[11px] text-grey">{i + 1}</span>
+                  <KindIcon kind={a.kind} />
+                  <span className="truncate font-hand text-[17px] leading-tight">{a.newText && a.kind === "change-text" ? `→ ${a.newText}` : a.label}</span>
+                </button>
+                <FlagButton refTo={{ tab: "sketch", id: a.id, label: a.label.slice(0, 60) }} title={a.label} detail={a.detail} label="" />
+              </div>
 
               <AnimatePresence initial={false}>
                 {open && (
@@ -49,8 +55,8 @@ export default function AnnotationList(p: {
                     transition={{ type: "spring", stiffness: 420, damping: 40 }}
                   >
                     <div className="flex flex-col gap-2 px-3 pb-3">
-                      <div className="flex flex-wrap gap-1">
-                        {KINDS.map((k) => (
+                      {kinds.length > 1 && <div className="flex flex-wrap gap-1">
+                        {kinds.map((k) => (
                           <button
                             key={k.kind}
                             onClick={() =>
@@ -66,7 +72,7 @@ export default function AnnotationList(p: {
                             {k.name}
                           </button>
                         ))}
-                      </div>
+                      </div>}
                       <input
                         autoFocus
                         className="input font-hand !text-[17px]"

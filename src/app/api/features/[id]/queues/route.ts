@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { proposeFromGit, proposeFromPrompt } from "@/lib/queues/propose";
 import { findPiece, pieceIdFrom, pieceOfQueue, pieceView, withPiece } from "@/lib/pieces";
 import { getFeature, updateFeature } from "@/lib/store";
+import { featureMode } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -16,6 +17,8 @@ export async function POST(req: Request, { params }: Ctx) {
   const pid = pieceIdFrom(req.url, b);
   const stored = getFeature(fid);
   if (!stored) return err("not found", 404);
+  // a proposal diffs a change: nothing to propose when explaining an existing feature
+  if (featureMode(stored) === "understand") return err("proposals are build-only (this feature is in understand mode)", 409);
   if (pid && !findPiece(stored, pid)) return err("piece not found", 404);
   const feature = pieceView(stored, pid);
   try {

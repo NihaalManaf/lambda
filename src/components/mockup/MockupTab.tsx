@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { nanoid } from "nanoid";
-import type { Annotation, AnnotationKind, Box, FeatureView } from "@/lib/types";
+import { featureMode, type Annotation, type AnnotationKind, type Box, type FeatureMode, type FeatureView } from "@/lib/types";
 import Painter from "@/components/Painter";
 import { appDown, captureMockup, deleteMockup, loadSettings, resketch, saveAnnotations, shotUrl, startSketchJob, type SettingsLite, type SketchMockup } from "./api";
 import AnnotationList from "./AnnotationList";
 import CaptureBar, { type CaptureInput } from "./CaptureBar";
 import KindIcon from "./KindIcon";
 import { KINDS, kindMeta } from "./marks";
+import { DEFAULT_VIEWPORT, foldOf, viewportOf, VIEWPORTS } from "@/lib/viewports";
 import SketchCanvas from "./SketchCanvas";
 
 // UI sketch: marker over a real screenshot of the running frontend. Scope, not a render.
@@ -28,6 +29,13 @@ function phaseOf(job: Job, sec: number) {
 }
 
 const spring = { type: "spring", stiffness: 420, damping: 36 } as const;
+
+// per-mode copy + palette: understand only explains the existing ui, so it draws notes only
+const COPY: Record<FeatureMode, { again: string; start: string; ask: string; running: string; rerun: string; run: string; eyebrow: string }> = {
+  build: { again: "auto-sketch again", start: "auto-sketch this piece", ask: "what changes?", running: "sketching…", rerun: "re-sketch", run: "sketch it", eyebrow: "ui sketch" },
+  understand: { again: "auto-annotate again", start: "auto-annotate this area", ask: "what to point out?", running: "annotating…", rerun: "re-annotate", run: "annotate", eyebrow: "ui map" },
+};
+const KINDS_FOR: Record<FeatureMode, typeof KINDS> = { build: KINDS, understand: KINDS.filter((k) => k.kind === "note") };
 // event-time stamp for the local job timer (handlers only)
 const stamp = () => Date.now();
 
@@ -35,6 +43,10 @@ export default function MockupTab({ feature, onChange }: { feature: FeatureView;
   // auto sketches (the background job) first, then manual captures, each newest first as stored
   const mockups = [...feature.mockups.filter((m) => m.auto), ...feature.mockups.filter((m) => !m.auto)] as SketchMockup[];
   const autoJob = feature.jobs?.find((j) => j.kind === "sketch");
+  const fmode = featureMode(feature);
+  const understand = fmode === "understand"; // marks explain the existing ui
+  const copy = COPY[fmode];
+  const kinds = KINDS_FOR[fmode];
   const autoBusy = autoJob?.status === "queued" || autoJob?.status === "running";
   const down = appDown(autoJob);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -46,9 +58,10 @@ export default function MockupTab({ feature, onChange }: { feature: FeatureView;
   const [selId, setSelId] = useState<string | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [mode, setMode] = useState<"select" | "draw">("select");
-  const [drawKind, setDrawKind] = useState<AnnotationKind>("insert");
+  const [drawKind, setDrawKind] = useState<AnnotationKind>(understand ? "note" : "insert");
   const [intentDraft, setIntentDraft] = useState<Record<string, string>>({});
   const [save, setSave] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [fit, setFit] = useState<"screen" | "width">("screen");
 
   const active = mockups.find((m) => m.id === activeId) ?? mockups[0];
   const anns = active?.annotations ?? [];
@@ -125,6 +138,7 @@ export default function MockupTab({ feature, onChange }: { feature: FeatureView;
         accountId: c.accountId,
         intent: c.intent || undefined,
         pieceId: feature.pieceId || undefined,
+        viewport: c.viewport,
       });
       onChange(f);
       setActiveId(f.mockups[0]?.id ?? null);
@@ -203,7 +217,7 @@ export default function MockupTab({ feature, onChange }: { feature: FeatureView;
 
   return (
     <div ref={rootRef} className="flex flex-col gap-6">
-      <CaptureBar settings={settings} busy={Boolean(job)} onCapture={capture} />
+      <CaptureBar settings={settings} busy={Boolean(job)} onCapture={capture} understand={understand} />
 
       <AnimatePresence initial={false}>
         {down && !autoBusy && (
@@ -228,7 +242,7 @@ export default function MockupTab({ feature, onChange }: { feature: FeatureView;
           <motion.div key="note" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 self-start">
             {autoJob.note && <AutoNote note={autoJob.note} />}
             <button onClick={retryAuto} disabled={starting} className="chip hover:border-ink disabled:opacity-50">
-              auto-sketch again
+              {copy.again}
             </button>
           </motion.div>
         )}
@@ -242,7 +256,7 @@ export default function MockupTab({ feature, onChange }: { feature: FeatureView;
             disabled={starting}
             className="chip self-start hover:border-ink disabled:opacity-50"
           >
-            <span className="h-1.5 w-1.5 rounded-full bg-lilac" /> auto-sketch this piece
+            <span className="h-1.5 w-1.5 rounded-full bg-lilac" /> {copy.start}
           </motion.button>
         )}
       </AnimatePresence>
@@ -314,7 +328,10 @@ export default function MockupTab({ feature, onChange }: { feature: FeatureView;
                       <motion.span layoutId="sketch-active" transition={spring} className="pointer-events-none absolute inset-0 rounded-xl ring-2 ring-ink ring-inset" />
                     )}
                   </div>
-                  <div className="mt-1.5 truncate font-mono text-[11px] text-grey">{pathOf(m.url)}</div>
+                  <div className="mt-1.5 truncate font-mono text-[11px] text-grey">
+                    {pathOf(m.url)}
+                    {m.width !== viewportOf(DEFAULT_VIEWPORT).width && <span className="opacity-60"> · {VIEWPORTS.find((v) => v.width === m.width)?.name ?? `${m.width}px`}</span>}
+                  </div>
                 </button>
                 <button
                   onClick={() => remove(m.id)}
@@ -330,7 +347,7 @@ export default function MockupTab({ feature, onChange }: { feature: FeatureView;
       )}
 
       {capturing && !active && <Pending text={phaseOf(job, sec)} />}
-      {!active && !job && !autoBusy && !down && <Empty />}
+      {!active && !job && !autoBusy && !down && <Empty kinds={kinds} eyebrow={copy.eyebrow} />}
 
       {active && (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
@@ -346,7 +363,7 @@ export default function MockupTab({ feature, onChange }: { feature: FeatureView;
                 ))}
               </div>
               <span className="mx-1 h-4 w-px bg-line-2" />
-              {KINDS.map((k) => {
+              {kinds.map((k) => {
                 const on = mode === "draw" && drawKind === k.kind;
                 return (
                   <button
@@ -363,9 +380,26 @@ export default function MockupTab({ feature, onChange }: { feature: FeatureView;
               <span className="ml-auto font-mono text-[11px] text-grey">
                 {mode === "draw" ? "drag a box · esc" : save === "saving" ? "saving…" : save === "error" ? "save failed" : save === "saved" ? "saved" : "d = draw"}
               </span>
+              <div className="flex rounded-full border border-line-2 bg-card p-0.5" title={`captured at ${active.width}×${foldOf(active)}`}>
+                {(["screen", "width"] as const).map((f) => (
+                  <button key={f} onClick={() => setFit(f)} className={`relative rounded-full px-2.5 py-0.5 font-mono text-[11px] ${fit === f ? "text-paper" : "text-grey"}`}>
+                    {fit === f && <motion.span layoutId="sketch-fit" transition={spring} className="absolute inset-0 rounded-full bg-ink" />}
+                    <span className="relative">fit {f}</span>
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div className="relative max-h-[78vh] overflow-y-auto overscroll-contain rounded-2xl border border-line bg-card shadow-[0_20px_60px_-30px_rgba(24,24,24,0.35)]">
+            <div
+              className="relative mx-auto max-h-[78vh] w-full overflow-y-auto overscroll-contain rounded-2xl border border-line bg-card shadow-[0_20px_60px_-30px_rgba(24,24,24,0.35)]"
+              // never past capture size; "screen": the first screen (one viewport tall) fits the frame
+              style={{
+                maxWidth:
+                  fit === "screen"
+                    ? `min(100%, ${active.width}px, calc(72vh * ${(active.width / foldOf(active)).toFixed(4)}))`
+                    : `min(100%, ${active.width}px)`,
+              }}
+            >
               <SketchCanvas
                 key={active.id}
                 mockup={active}
@@ -397,7 +431,7 @@ export default function MockupTab({ feature, onChange }: { feature: FeatureView;
             </div>
 
             <div className="flex flex-col gap-2">
-              <div className="eyebrow">what changes?</div>
+              <div className="eyebrow">{copy.ask}</div>
               <textarea
                 className="input max-h-64 min-h-[5.5rem] resize-none font-hand !text-[16px] leading-snug [field-sizing:content]"
                 rows={3}
@@ -409,7 +443,7 @@ export default function MockupTab({ feature, onChange }: { feature: FeatureView;
                 }}
               />
               <button className="btn btn-lilac self-start" disabled={Boolean(job) || !intent.trim()} onClick={() => void runSketch()}>
-                {job?.kind === "sketch" ? "sketching…" : anns.length ? "re-sketch" : "sketch it"}
+                {job?.kind === "sketch" ? copy.running : anns.length ? copy.rerun : copy.run}
               </button>
             </div>
 
@@ -422,7 +456,7 @@ export default function MockupTab({ feature, onChange }: { feature: FeatureView;
                   ))}
                 </div>
               ) : (
-                <AnnotationList annotations={anns} selectedId={selId} onSelect={setSelId} onHover={setHoverId} onEdit={editAnn} onDelete={deleteAnn} />
+                <AnnotationList annotations={anns} selectedId={selId} onSelect={setSelId} onHover={setHoverId} onEdit={editAnn} onDelete={deleteAnn} kinds={kinds} />
               )}
             </div>
           </aside>
@@ -497,16 +531,16 @@ function AppDownCard({ url, reason, onRetry }: { url: string; reason?: string; o
   );
 }
 
-function Empty() {
+function Empty({ kinds, eyebrow }: { kinds: typeof KINDS; eyebrow: string }) {
   return (
     <div className="card relative flex min-h-[280px] items-center overflow-hidden px-8 py-10">
       <div className="relative z-10 max-w-sm">
-        <div className="eyebrow">ui sketch</div>
+        <div className="eyebrow">{eyebrow}</div>
         <h3 className="display mt-2 text-4xl">
           mark up the <em>real</em> thing.
         </h3>
         <div className="mt-4 flex flex-wrap gap-1.5">
-          {KINDS.map((k) => (
+          {kinds.map((k) => (
             <span key={k.kind} className="chip">
               <KindIcon kind={k.kind} size={12} />
               {k.name}

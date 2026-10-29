@@ -1,26 +1,58 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
+import { motion } from "motion/react";
+import { DEFAULT_VIEWPORT, VIEWPORTS, type ViewportId } from "@/lib/viewports";
 import type { SettingsLite } from "./api";
 
-// url/path + test account + "what changes?" -> capture (+ sketch).
+// url/path + device + test account + "what changes?" -> capture (+ sketch).
 
 export interface CaptureInput {
   target: string;
   accountId?: string;
   intent: string;
+  viewport: ViewportId;
 }
 
-export default function CaptureBar(p: { settings: SettingsLite | null; busy: boolean; onCapture: (c: CaptureInput) => void }) {
+const VP_KEY = "lambda:sketch-viewport";
+const spring = { type: "spring", stiffness: 420, damping: 36 } as const;
+
+// remembered per browser
+const readVp = (): ViewportId => {
+  try {
+    const v = localStorage.getItem(VP_KEY);
+    return VIEWPORTS.some((x) => x.id === v) ? (v as ViewportId) : DEFAULT_VIEWPORT;
+  } catch {
+    return DEFAULT_VIEWPORT;
+  }
+};
+const subscribe = (cb: () => void) => {
+  window.addEventListener(VP_KEY, cb);
+  window.addEventListener("storage", cb);
+  return () => {
+    window.removeEventListener(VP_KEY, cb);
+    window.removeEventListener("storage", cb);
+  };
+};
+const writeVp = (v: ViewportId) => {
+  try {
+    localStorage.setItem(VP_KEY, v);
+  } catch {}
+  window.dispatchEvent(new Event(VP_KEY));
+};
+
+// understand: the marker explains what's there instead of marking changes
+export default function CaptureBar(p: { settings: SettingsLite | null; busy: boolean; onCapture: (c: CaptureInput) => void; understand?: boolean }) {
   const [target, setTarget] = useState<string | null>(null); // null = follow settings default
   const [accountId, setAccountId] = useState("");
   const [intent, setIntent] = useState("");
   const value = target ?? p.settings?.frontendUrl ?? "";
+  const viewport = useSyncExternalStore(subscribe, readVp, () => DEFAULT_VIEWPORT);
   const accounts = p.settings?.accounts ?? [];
 
   const submit = () => {
     if (p.busy || !value.trim()) return;
-    p.onCapture({ target: value.trim(), accountId: accountId || undefined, intent: intent.trim() });
+    p.onCapture({ target: value.trim(), accountId: accountId || undefined, intent: intent.trim(), viewport });
   };
 
   return (
@@ -42,6 +74,22 @@ export default function CaptureBar(p: { settings: SettingsLite | null; busy: boo
             spellCheck={false}
           />
         </label>
+        <div className="flex shrink-0 rounded-full border border-line-2 bg-card p-0.5" role="radiogroup" aria-label="capture size">
+          {VIEWPORTS.map((v) => (
+            <button
+              key={v.id}
+              type="button"
+              role="radio"
+              aria-checked={viewport === v.id}
+              title={`${v.width}×${v.height}`}
+              onClick={() => writeVp(v.id)}
+              className={`relative rounded-full px-3 py-1 text-[13px] font-semibold ${viewport === v.id ? "text-paper" : "text-ink-2"}`}
+            >
+              {viewport === v.id && <motion.span layoutId="capture-vp" transition={spring} className="absolute inset-0 rounded-full bg-ink" />}
+              <span className="relative">{v.name}</span>
+            </button>
+          ))}
+        </div>
         {accounts.length > 0 && (
           <select className="input md:!w-52" value={accountId} onChange={(e) => setAccountId(e.target.value)} aria-label="log in as">
             <option value="">no login</option>
@@ -58,14 +106,18 @@ export default function CaptureBar(p: { settings: SettingsLite | null; busy: boo
           className="input min-h-[44px] flex-1 resize-none font-hand !text-[17px] leading-snug"
           rows={2}
           value={intent}
-          placeholder="what changes? e.g. add a filter bar above the table, drop the export button"
+          placeholder={
+            p.understand
+              ? "what should I point out? e.g. where invites are sent from"
+              : "what changes? e.g. add a filter bar above the table, drop the export button"
+          }
           onChange={(e) => setIntent(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
           }}
         />
         <button type="submit" className="btn btn-primary shrink-0" disabled={p.busy || !value.trim()}>
-          {intent.trim() ? "capture + sketch" : "capture"}
+          {intent.trim() ? (p.understand ? "capture + annotate" : "capture + sketch") : "capture"}
           <span className="font-mono text-[11px] opacity-60">⌘↵</span>
         </button>
       </div>

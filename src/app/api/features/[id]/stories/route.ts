@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { pieceIdFrom, pieceOfStory, pieceView, withPiece } from "@/lib/pieces";
 import { getFeature, id, updateFeature } from "@/lib/store";
-import { generateStories } from "@/lib/stories";
+import { startJobs, sweepStale } from "@/lib/jobs";
 import type { Story } from "@/lib/types";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -10,7 +10,9 @@ const fail = (e: unknown, status = 500) =>
   NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status });
 
 // All take ?piece= or body.pieceId (default: first piece) and return that piece's view.
-// POST {} -> generate the piece's stories (replaces). POST {story} -> add one manual story.
+// POST {} -> (re)generate the piece's stories as a background job: the code is read first when the piece has
+// no facts, and the result is checked against it after (src/lib/jobs.ts); the view comes back with the jobs
+// queued. POST {story} -> add one manual story.
 export async function POST(req: Request, { params }: Ctx) {
   const fid = (await params).id;
   const body = (await req.json().catch(() => ({}))) as { story?: Partial<Story>; pieceId?: string };
@@ -33,8 +35,8 @@ export async function POST(req: Request, { params }: Ctx) {
     const f0 = getFeature(fid);
     if (!f0) return fail("not found", 404);
     if (pid && !f0.pieces.some((p) => p.id === pid)) return fail("piece not found", 404);
-    const stories = await generateStories(pieceView(f0, pid)); // slow: outside the lock
-    const f = await updateFeature(fid, (f) => withPiece(f, pid, (v) => void (v.stories = stories)));
+    await sweepStale(fid);
+    const f = await startJobs(fid, ["stories"], pid);
     return NextResponse.json(pieceView(f, pid));
   } catch (e) {
     return fail(e);

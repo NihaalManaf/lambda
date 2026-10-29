@@ -95,6 +95,10 @@ export function applyStoryOpWith(f: Target, op: StoryOp, mkId: MkId): ChangeNote
       if (c.then !== undefined) a.then = clean(c.then);
       if (c.startPath !== undefined) a.startPath = normPath(c.startPath);
       if (c.steps !== undefined) a.steps = steps(c.steps);
+      // the check stage marks; an edit to what it judged (route / steps) supersedes the mark
+      const mark = c.unverified === undefined ? undefined : clean(c.unverified).slice(0, 200);
+      if (mark) a.unverified = mark;
+      else if (mark === "" || c.startPath !== undefined || c.steps !== undefined) delete a.unverified;
       return note("~", "criterion", a.then || s.want, s.id);
     }
     case "remove_criterion": {

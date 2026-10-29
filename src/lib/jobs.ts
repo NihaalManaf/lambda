@@ -3,7 +3,10 @@ import { z } from "zod";
 import { discoverContext, mergeDiscovered } from "./autocontext";
 import { BUDGET_MS as SKETCH_BUDGET_MS, autoSketch, mergeAutoMockups } from "./autosketch";
 import { removeShot } from "./capture";
+import { planCheck } from "./check";
+import { factsOf, groundingPrompt } from "./facts";
 import { generateFlows } from "./flows";
+import { applyCheckPlan, checkNote, factsNote, readFacts, runVerifier } from "./grounding";
 import { featurePrompt, generate } from "./llm";
 import { ensurePiece, findPiece, pieceView, withPiece } from "./pieces";
 import { proposeFromPrompt as proposeQueues } from "./queues/propose";
@@ -13,6 +16,7 @@ import { generateStories } from "./stories";
 import {
   INFRA_LENS,
   autoLenses,
+  featureMode,
   isFeatureJobKind,
   type Feature,
   type FeatureJobKind,
@@ -20,22 +24,36 @@ import {
   type FeatureView,
   type Job,
   type JobKind,
+  type Piece,
   type PieceJobKind,
 } from "./types";
 
 // Background generation. In-process, never awaited by the request that starts it; status lives in
 // feature.jobs (feature-level: context) and piece.jobs (per piece: stories, flows, needs → schema/queues),
-// so any tab (or a reload) sees progress. Order: context → every piece in parallel (stories → sketch ∥ flows ∥
-// needs → schema/queues). Piece work runs on a pieceView: featurePrompt carries the brief + piece scope.
+// so any tab (or a reload) sees progress. Order: context → every piece in parallel: facts (a Claude Code session
+// reads the code) → stories ∥ flows ∥ needs (→ schema/queues) → check (a verifier session); sketch after
+// stories. Piece work runs on a pieceView: featurePrompt carries the brief + piece scope, groundingPrompt the facts.
 
 // kinds a client may start (intake / pieces belong to the intake flow)
-export const JOB_KINDS: JobKind[] = ["context", "stories", "flows", "schema", "queues", "needs", "sketch"];
-const PIECE_FULL: PieceJobKind[] = ["stories", "flows", "needs", "sketch"];
+export const JOB_KINDS: JobKind[] = ["context", "facts", "stories", "flows", "schema", "queues", "needs", "sketch", "check"];
+const PIECE_FULL: PieceJobKind[] = ["facts", "stories", "flows", "needs", "sketch", "check"];
+export const BUILD_ONLY: PieceJobKind[] = ["schema", "queues"]; // proposals of a change: never in understand mode
 const CONTEXT_BUDGET_MS = 25_000;
+// facts / check: Claude Code sessions, at most this many at once in the process (cheap model calls aren't capped)
+const SESSION_CONCURRENCY = 3;
+// one session (5 min, src/lib/grounding.ts) + its re-ask + checkout prep; waiting for a slot isn't counted
+const SESSION_TIMEOUT_MS = 8 * 60_000;
+// how long dependants wait on a facts job running elsewhere (queued behind the cap, then a session)
+const FACTS_WAIT_MS = 30 * 60_000;
 
 // survives HMR module reloads; one per process
-const G = globalThis as { __lambdaJobs?: { live: Set<string>; detail: Map<string, { schema?: string; queues?: string }> } };
-const state = (G.__lambdaJobs ??= { live: new Set(), detail: new Map() });
+type Sessions = { active: number; waiters: (() => void)[] };
+type JobsState = { live: Set<string>; detail: Map<string, { schema?: string; queues?: string }>; sessions?: Sessions; recheck?: Set<string> };
+const G = globalThis as { __lambdaJobs?: JobsState };
+const state: JobsState = (G.__lambdaJobs ??= { live: new Set(), detail: new Map() });
+const sessions = (state.sessions ??= { active: 0, waiters: [] });
+// check keys asked for again while live here: the running check runs once more after it (on what was rewritten)
+const recheck = (state.recheck ??= new Set());
 const key = (fid: string, k: JobKind, pid?: string) => (pid && !isFeatureJobKind(k) ? `${fid}:${pid}:${k}` : `${fid}:${k}`);
 
 const short = (e: unknown) => (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").slice(0, 140);
@@ -51,12 +69,14 @@ function jobList(f: Feature, k: JobKind, pid?: string): Job[] {
 }
 
 // Mark kinds queued on f (in place) unless already live here, or active under another live process
-// (the installed app and `next dev` share one store). Returns accepted kinds.
+// (the installed app and `next dev` share one store). Returns accepted kinds. A check live here isn't
+// dropped: it's flagged to run again once it's done.
 function markQueued<K extends JobKind>(f: Feature, kinds: K[], pid?: string): K[] {
   const accepted: K[] = [];
   for (const k of [...new Set(kinds)]) {
     const list = jobList(f, k, pid);
     const elsewhere = list.some((j) => j.kind === k && isActive(j) && !!j.pid && j.pid !== process.pid && alive(j.pid));
+    if (state.live.has(key(f.id, k, pid)) && k === "check") recheck.add(key(f.id, k, pid));
     if (state.live.has(key(f.id, k, pid)) || elsewhere) continue;
     state.live.add(key(f.id, k, pid));
     const j: Job = { kind: k, status: "queued", pid: process.pid };
@@ -77,7 +97,10 @@ const isView = (f: Feature) => typeof (f as FeatureView).pieceId === "string";
 // Piece kinds without a pieceId go to the first piece (created if the feature has none).
 export function queueJobsInPlace(f: Feature, kinds?: JobKind[], pieceId?: string): JobKind[] {
   const featureKinds = (kinds ? kinds.filter(isFeatureJobKind) : ["context"]).filter((k): k is FeatureJobKind => k === "context");
-  const pieceKinds = (kinds ? kinds.filter((k) => !isFeatureJobKind(k)) : PIECE_FULL) as PieceJobKind[];
+  // understand: schema / queue proposals diff a proposed change — build-only, dropped here
+  const pieceKinds = ((kinds ? kinds.filter((k) => !isFeatureJobKind(k)) : PIECE_FULL) as PieceJobKind[]).filter(
+    (k) => featureMode(f) === "build" || !BUILD_ONLY.includes(k),
+  );
   const plan: Plan = { feature: [], pieces: [] };
   if (pieceKinds.length) {
     if (isView(f)) throw new Error("piece jobs must be queued on the stored feature");
@@ -90,7 +113,7 @@ export function queueJobsInPlace(f: Feature, kinds?: JobKind[], pieceId?: string
           queues: !!p.needs?.queues || pieceKinds.includes("queues"),
           why: p.needs?.why ?? "added by hand",
         };
-      const accepted = markQueued(f, pieceKinds, p.id);
+      const accepted = markQueued(f, pieceKindsFor(f, p, pieceKinds), p.id);
       if (accepted.length) plan.pieces.push({ pid: p.id, kinds: accepted });
     }
   }
@@ -98,6 +121,22 @@ export function queueJobsInPlace(f: Feature, kinds?: JobKind[], pieceId?: string
   const all: JobKind[] = [...plan.feature, ...plan.pieces.flatMap((p) => p.kinds)];
   if (all.length) setTimeout(() => void run(f.id, plan), 0); // after the caller's lock
   return all;
+}
+
+// facts read for another checkout (build: the pin moved), missing, or never finished → read again
+const factsStale = (f: Feature, p: Piece) =>
+  !p.facts || !!p.facts.incomplete || (featureMode(f) === "build" && !!f.intake?.baseSha && !!p.facts.sha && p.facts.sha !== f.intake.baseSha);
+
+// A piece's kinds for this run: (re)writing stories or flows reads the code first when the piece's facts
+// are missing / stale, and checks the result against the code after. Re-reading the code of a piece that
+// already has stories / flows checks them again too.
+export function pieceKindsFor(f: Feature, p: Piece, kinds: PieceJobKind[]): PieceJobKind[] {
+  const ks = [...new Set(kinds)];
+  const writes = ks.includes("stories") || ks.includes("flows");
+  if (writes && !ks.includes("facts") && factsStale(f, p)) ks.unshift("facts");
+  const rereads = ks.includes("facts") && (p.stories.length > 0 || p.flowcharts.length > 0);
+  if ((writes || rereads) && !ks.includes("check")) ks.push("check");
+  return ks;
 }
 
 export async function startJobs(fid: string, kinds?: JobKind[], pieceId?: string): Promise<Feature> {
@@ -152,10 +191,83 @@ async function job(fid: string, k: JobKind, pid: string | undefined, work: Work)
 
 const detailKey = (fid: string, pid: string) => `${fid}:${pid}`;
 
-const WORK: Record<"context" | "stories" | "flows" | "schema" | "queues" | "sketch", (fid: string, pid: string) => Work> = {
+// one of SESSION_CONCURRENCY slots: a release hands the slot straight to the next waiter
+async function inSlot<T>(onWait: () => void, fn: () => Promise<T>): Promise<T> {
+  if (sessions.active < SESSION_CONCURRENCY) sessions.active++;
+  else {
+    onWait();
+    await new Promise<void>((r) => sessions.waiters.push(r));
+  }
+  try {
+    return await fn();
+  } finally {
+    const next = sessions.waiters.shift();
+    if (next) next();
+    else sessions.active--;
+  }
+}
+
+// a session's tool lines → the job's note (throttled: each is a store write)
+function progress(fid: string, k: PieceJobKind, pid: string) {
+  let last = 0;
+  return (line: string) => {
+    if (Date.now() - last < 3000) return;
+    last = Date.now();
+    void setJob(fid, k, pid, { note: line.slice(0, 120) }).catch(() => undefined);
+  };
+}
+const waiting = (fid: string, k: PieceJobKind, pid: string) => () => void setJob(fid, k, pid, { note: "waiting for a free session" }).catch(() => undefined);
+
+const WORK: Record<"context" | "facts" | "stories" | "flows" | "schema" | "queues" | "sketch" | "check", (fid: string, pid: string) => Work> = {
   context: () => async (f0) => {
     const { refs, status } = await discoverContext(f0, { timeoutMs: CONTEXT_BUDGET_MS });
     return (f) => mergeDiscovered(f, refs, status);
+  },
+  // a Claude Code session reads the piece in the checkout → piece.facts. A failed read keeps the route scan
+  // (marked incomplete) and errors, so the generators fall back and the retry chip shows.
+  facts: (fid, pid) => async (f0) => {
+    const r = await inSlot(waiting(fid, "facts", pid), () =>
+      readFacts(pieceOf(fid, pid) ?? f0, { signal: AbortSignal.timeout(SESSION_TIMEOUT_MS), onStatus: progress(fid, "facts", pid) }),
+    );
+    // never trade facts that were read for a failed / skipped attempt
+    const keep = (p?: Piece) => !!p?.facts && !p.facts.incomplete && !!r.facts.incomplete;
+    if (r.error) {
+      await updateFeature(fid, (f) => {
+        const p = f.pieces.find((x) => x.id === pid);
+        if (p && !keep(p)) p.facts = r.facts;
+      });
+      throw new Error(`couldn't read the code: ${r.error}`);
+    }
+    return (v) => {
+      const p = v.pieces.find((x) => x.id === v.pieceId);
+      if (p && !keep(p)) p.facts = r.facts;
+      const j = v.jobs?.find((x) => x.kind === "facts");
+      if (j) j.note = r.skipped ? `skipped — ${r.skipped}` : factsNote(r.facts);
+    };
+  },
+  // after stories + flows: startPaths vs the scanned routes, then a verifier session's verdicts → fixes
+  // through the story / flow ops, understand issues, piece.check (src/lib/check.ts, src/lib/grounding.ts)
+  check: (fid, pid) => async (f0) => {
+    let v0 = f0;
+    let failed: string | undefined;
+    const r = await inSlot(waiting(fid, "check", pid), () => {
+      v0 = pieceOf(fid, pid) ?? f0; // what the verifier reads: stories / flows as they are now
+      return runVerifier(v0, { signal: AbortSignal.timeout(SESSION_TIMEOUT_MS), onStatus: progress(fid, "check", pid) });
+    }).catch((e) => void (failed = short(e)));
+    const facts = factsOf(v0);
+    const routes = r?.routes.length ? r.routes : (facts?.appRoutes ?? []);
+    const plan = planCheck(v0, r?.items ?? [], routes, featureMode(v0), pid);
+    const note = !routes.length ? "no app routes found — routes not checked" : r?.skipped ? `no codebase (${r.skipped}) — routes only` : undefined;
+    if (failed) {
+      // the route check still lands; the verifier is retried from the chip
+      await updateFeature(fid, (f) => withPiece(f, pid, (v) => void applyCheckPlan(v, plan, { sha: facts?.sha, note: "verifier failed — routes only" }))).catch(() => undefined);
+      throw new Error(`check failed: ${failed}`);
+    }
+    return (v) => {
+      const c = applyCheckPlan(v, plan, { sha: r?.sha ?? facts?.sha, note });
+      const j = v.jobs?.find((x) => x.kind === "check");
+      if (j) j.note = checkNote(c);
+    };
   },
   stories: () => async (f0) => {
     const before = new Set(f0.stories.map((s) => s.id));
@@ -179,10 +291,12 @@ const WORK: Record<"context" | "stories" | "flows" | "schema" | "queues" | "sket
     };
   },
   schema: (fid, pid) => async (f0) => {
+    if (featureMode(f0) === "understand") throw new Error("schema proposals are build-only");
     const p = await proposeSchema(f0, state.detail.get(detailKey(fid, pid))?.schema || f0.needs?.why || f0.brief || f0.title);
     return (f) => void (f.schema = [...(f.schema ?? []), p]);
   },
   queues: (fid, pid) => async (f0) => {
+    if (featureMode(f0) === "understand") throw new Error("queue proposals are build-only");
     const p = await proposeQueues(f0, state.detail.get(detailKey(fid, pid))?.queues || f0.needs?.why || f0.brief || f0.title);
     return (f) => void (f.queues = [...(f.queues ?? []), p]);
   },
@@ -213,6 +327,19 @@ const NeedsOut = z.object({
   queueChange: z.string().describe("if queues: the async change in <= 25 words, else empty"),
 });
 
+// understand: needs = "touches db / async work today" — only decides whether the infra lens is drawn.
+// No change fields: nothing is proposed, so the model isn't asked to fill them.
+const NeedsOutUnderstand = z.object({
+  schema: z.boolean().describe("as implemented today, this feature reads/writes db tables"),
+  queues: z.boolean().describe("as implemented today, this feature runs async work (queues, jobs, crons, webhooks)"),
+  why: z.string().describe("<= 12 words"),
+});
+
+const grounding = (v: FeatureView) => {
+  const g = groundingPrompt(factsOf(v));
+  return g ? `\n\n${g}` : "";
+};
+
 const pieceOf = (fid: string, pid: string) => {
   const f = getFeature(fid);
   return f && f.pieces.some((p) => p.id === pid) ? pieceView(f, pid) : undefined;
@@ -225,17 +352,31 @@ async function needsCheck(fid: string, pid: string) {
     const v0 = pieceOf(fid, pid);
     if (!v0) return;
     let needs: FeatureNeeds | undefined = v0.needs;
+    const mode = featureMode(v0);
+    const understand = mode === "understand";
     if (!needs) {
-      const out = await generate({
-        schema: NeedsOut,
-        effort: "low",
-        maxTokens: 800,
-        prompt: `${featurePrompt(v0)}\n\ndoes building this ${v0.pieces.length > 1 ? "piece" : "feature"} change the database schema? does it add or change async work (queues, background jobs, crons, webhooks)? say false unless clearly needed.`,
-      });
+      const ask = { effort: "low", maxTokens: 800, mode } as const;
+      const n = v0.pieces.length > 1;
+      let out: z.infer<typeof NeedsOutUnderstand>;
+      if (understand) {
+        out = await generate({
+          ...ask,
+          schema: NeedsOutUnderstand,
+          prompt: `${featurePrompt(v0)}${grounding(v0)}\n\nas implemented today, does this ${n ? "sub-area" : "feature"} read/write the database? does it run async work (queues, background jobs, crons, webhooks)? say false unless the code clearly does.`,
+        });
+      } else {
+        const o = await generate({
+          ...ask,
+          schema: NeedsOut,
+          prompt: `${featurePrompt(v0)}${grounding(v0)}\n\ndoes building this ${n ? "piece" : "feature"} change the database schema? does it add or change async work (queues, background jobs, crons, webhooks)? say false unless clearly needed.`,
+        });
+        state.detail.set(detailKey(fid, pid), { schema: o.schemaChange || undefined, queues: o.queueChange || undefined });
+        out = o;
+      }
       needs = { schema: out.schema, queues: out.queues, why: out.why.split(/\s+/).slice(0, 12).join(" ") };
-      state.detail.set(detailKey(fid, pid), { schema: out.schemaChange || undefined, queues: out.queueChange || undefined });
     }
-    const kinds: PieceJobKind[] = [
+    // understand: no proposals, the infra lens (drawInfra below) still explains the backend path
+    const kinds: PieceJobKind[] = understand ? [] : [
       ...(needs.schema && !v0.schema?.length ? (["schema"] as const) : []),
       ...(needs.queues && !v0.queues?.length ? (["queues"] as const) : []),
     ];
@@ -277,26 +418,64 @@ async function drawInfra(fid: string, pid: string, needs: FeatureNeeds | undefin
     }).catch(() => undefined);
 }
 
-// sketch runs after the piece's stories (this run's, or one already running elsewhere): their startPaths are its routes
-function runPiece(fid: string, pid: string, kinds: PieceJobKind[]) {
+export type PieceSteps = {
+  job: (k: PieceJobKind) => Promise<unknown>; // one kind's job (never rejects)
+  settled: (k: PieceJobKind, maxMs?: number) => Promise<void>; // no `k` job active on the piece (this run's or elsewhere)
+  again?: (k: "check") => boolean; // asked for again meanwhile (consumed)
+};
+
+// Per-piece order: facts (this run's, or one running elsewhere) → stories ∥ flows ∥ needs → check once all
+// three settled (writers elsewhere wait on their own facts read: as long as facts); sketch after stories
+// (their startPaths are its routes). A failed facts read never blocks: the generators fall back to the brief
+// alone. A check asked for again while it waits / runs settles the writers again and runs once more.
+export function sequencePiece(kinds: PieceJobKind[], s: PieceSteps): Promise<unknown[]> {
   const runs = new Map<PieceJobKind, Promise<unknown>>();
-  for (const k of kinds)
-    if (k !== "sketch") runs.set(k, k === "needs" ? needsCheck(fid, pid) : job(fid, k, pid, WORK[k](fid, pid)));
+  const ok = (p?: Promise<unknown>) => (p ?? Promise.resolve()).catch(() => undefined);
+  const facts = ok(kinds.includes("facts") ? s.job("facts") : s.settled("facts", FACTS_WAIT_MS));
+  runs.set("facts", facts);
+  for (const k of kinds) if (k !== "facts" && k !== "sketch" && k !== "check") runs.set(k, facts.then(() => s.job(k)));
   if (kinds.includes("sketch"))
     runs.set(
       "sketch",
       (async () => {
-        await runs.get("stories");
-        await settled(fid, pid, "stories");
-        await job(fid, "sketch", pid, WORK.sketch(fid, pid));
+        await ok(runs.get("stories"));
+        await s.settled("stories");
+        await s.job("sketch");
       })(),
     );
-  return Promise.all(runs.values());
+  if (kinds.includes("check"))
+    runs.set(
+      "check",
+      (async () => {
+        const writers = ["stories", "flows", "needs"] as const;
+        await Promise.all([facts, ...writers.map((k) => ok(runs.get(k)))]);
+        do {
+          do for (const k of writers) await s.settled(k, FACTS_WAIT_MS);
+          while (s.again?.("check")); // rewritten while we waited: settle those too
+          await s.job("check");
+        } while (s.again?.("check"));
+      })(),
+    );
+  return Promise.all([...runs.values()].map(ok));
 }
 
-// wait (<= 5 min) until no `k` job is queued / running on the piece
-async function settled(fid: string, pid: string, k: PieceJobKind) {
-  for (let i = 0; i < 300 && pieceOf(fid, pid)?.jobs?.some((j) => j.kind === k && isActive(j)); i++)
+function runPiece(fid: string, pid: string, kinds: PieceJobKind[]) {
+  return sequencePiece(kinds, {
+    job: (k) => (k === "needs" ? needsCheck(fid, pid) : job(fid, k, pid, WORK[k as keyof typeof WORK](fid, pid))),
+    settled: (k, maxMs) => settled(fid, pid, k, maxMs),
+    again: (k) => {
+      const kk = key(fid, k, pid);
+      if (!recheck.delete(kk)) return false;
+      state.live.add(kk); // job() dropped it: the next run is ours
+      void setJob(fid, k, pid, { status: "queued", pid: process.pid }).catch(() => undefined);
+      return true;
+    },
+  });
+}
+
+// wait (<= maxMs, default 5 min) until no `k` job is queued / running on the piece
+async function settled(fid: string, pid: string, k: PieceJobKind, maxMs = 300_000) {
+  for (const end = Date.now() + maxMs; Date.now() < end && pieceOf(fid, pid)?.jobs?.some((j) => j.kind === k && isActive(j)); )
     await new Promise((r) => setTimeout(r, 1000));
 }
 

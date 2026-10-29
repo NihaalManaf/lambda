@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Brief, ChatMessage } from "./types";
+import type { Brief, ChatMessage, IssueKind } from "./types";
 
 // Pure parsing for the intake conversation (client + server):
 // - lambda-ask / lambda-brief fenced blocks out of the session's reply
@@ -20,6 +20,14 @@ export const AskSchema = z.object({
   multi: z.boolean().optional().default(false),
 });
 
+// understand only: something to fix / extend later (src/lib/issues.ts)
+export const IssueBlockSchema = z.object({
+  title: str.pipe(z.string().min(1)).transform((s) => s.split(/\s+/).slice(0, 10).join(" ")),
+  detail: z.string().optional().transform((s) => s?.trim().slice(0, 600) || undefined),
+  kind: z.enum(["bug", "improvement", "question"]).catch("improvement" as IssueKind),
+});
+export type IssueBlock = z.infer<typeof IssueBlockSchema>;
+
 // what the session writes (lenient: missing lists → [], pieces 1..5)
 export const BriefSchema = z.object({
   summary: str.pipe(z.string().min(1, "summary is empty")),
@@ -38,18 +46,19 @@ export const BriefSchema = z.object({
     .transform((ps) => ps.slice(0, 5)),
 });
 
-// for structured output (skip path): plain shapes, no defaults/transforms
+// for structured output (skip path): plain shapes, no defaults/transforms. descriptions stay mode-neutral:
+// the system prompt (SKIP_BUILD / SKIP_UNDERSTAND) says what decisions, surfaces and pieces mean.
 export const BriefGenSchema = z.object({
   summary: z.string().describe("<= 40 words"),
   roles: z.array(z.string()).describe("user types"),
   inScope: z.array(z.string()).describe("each <= 10 words"),
   outOfScope: z.array(z.string()).describe("each <= 10 words"),
-  decisions: z.array(z.object({ q: z.string(), a: z.string() })).describe("what is already settled"),
-  openQuestions: z.array(z.string()).describe("unknowns left for edge cases"),
-  surfaces: z.array(z.string()).describe("screens / routes / tables / services touched"),
+  decisions: z.array(z.object({ q: z.string(), a: z.string() })).describe("short q → a pairs; see system prompt"),
+  openQuestions: z.array(z.string()).describe("unknowns"),
+  surfaces: z.array(z.string()).describe("real screens / routes / tables / services"),
   pieces: z
     .array(z.object({ title: z.string().describe("<= 6 words"), why: z.string().describe("<= 15 words"), scope: z.array(z.string()) }))
-    .describe("1..5 ordered PRs; one unless it genuinely should ship separately"),
+    .describe("1..5 ordered parts; see system prompt for what a part is"),
 });
 
 export function validateBrief(raw: unknown): { brief: Brief } | { error: string } {
@@ -60,12 +69,14 @@ export function validateBrief(raw: unknown): { brief: Brief } | { error: string 
 
 // ---------- fenced blocks ----------
 
-const FENCE = /```lambda-(ask|brief)\b([\s\S]*?)```/g;
+const FENCE = /```lambda-(ask|brief|issue)\b([\s\S]*?)```/g;
 const MAX_ASKS = 3;
+const MAX_ISSUES = 5;
 
 export interface ParsedReply {
   text: string; // reply with the blocks stripped
   asks: Ask[];
+  issues: IssueBlock[];
   brief?: Brief;
   briefError?: string; // a lambda-brief block was present but invalid
 }
@@ -87,6 +98,7 @@ function json(body: string): unknown {
 
 export function parseReply(raw: string): ParsedReply {
   const asks: Ask[] = [];
+  const issues: IssueBlock[] = [];
   let brief: Brief | undefined;
   let briefError: string | undefined;
   const text = raw.replace(FENCE, (_m, kind: string, body: string) => {
@@ -100,6 +112,9 @@ export function parseReply(raw: string): ParsedReply {
     if (kind === "ask") {
       const a = AskSchema.safeParse(data);
       if (a.success && asks.length < MAX_ASKS && !asks.some((x) => x.question === a.data.question)) asks.push(a.data);
+    } else if (kind === "issue") {
+      const i = IssueBlockSchema.safeParse(data);
+      if (i.success && issues.length < MAX_ISSUES && !issues.some((x) => x.title === i.data.title)) issues.push(i.data);
     } else if (!brief) {
       const v = validateBrief(data);
       if ("brief" in v) {
@@ -109,7 +124,39 @@ export function parseReply(raw: string): ParsedReply {
     }
     return "";
   });
-  return { text: tidy(text), asks, ...(brief ? { brief } : {}), ...(briefError && !brief ? { briefError } : {}) };
+  return { text: tidy(text), asks, issues, ...(brief ? { brief } : {}), ...(briefError && !brief ? { briefError } : {}) };
+}
+
+// The LAST ```lambda-<kind> block's JSON in a reply. null = no block; error = not valid JSON.
+export function lastBlockJson(raw: string, kind: string): { json: unknown } | { error: string } | null {
+  const re = new RegExp("```lambda-" + kind.replace(/[^\w-]/g, "") + "\\b([\\s\\S]*?)```", "g");
+  const bodies = [...raw.matchAll(re)].map((m) => m[1]);
+  if (!bodies.length) return null;
+  const t = bodies[bodies.length - 1].trim();
+  try {
+    return { json: JSON.parse(t) };
+  } catch {
+    // a stray language tag / prose line before the JSON: from the first { or [ to its last closer
+    const a = t.search(/[[{]/);
+    const b = Math.max(t.lastIndexOf("}"), t.lastIndexOf("]"));
+    try {
+      if (a < 0 || b <= a) throw new Error();
+      return { json: JSON.parse(t.slice(a, b + 1)) };
+    } catch {
+      return { error: `lambda-${kind} is not valid JSON` };
+    }
+  }
+}
+
+// The LAST ```lambda-<kind> block in a reply (facts / check sessions; intake's own blocks go through
+// parseReply), validated. null = no block; error = a block that isn't valid JSON or fails the schema.
+export function extractBlock<T>(raw: string, kind: string, schema: z.ZodType<T>): { data: T } | { error: string } | null {
+  const block = lastBlockJson(raw, kind);
+  if (!block || "error" in block) return block;
+  const data = block.json;
+  const r = schema.safeParse(data);
+  if (r.success) return { data: r.data };
+  return { error: r.error.issues.slice(0, 4).map((i) => `${i.path.join(".") || kind}: ${i.message}`).join("; ") };
 }
 
 // While streaming: drop finished blocks, cut at an unclosed ```lambda- fence, and hide a trailing partial

@@ -3,6 +3,7 @@ import { DATA_DIR, getSettings } from "@/lib/store";
 import { settingsView } from "@/components/settings/view";
 import SettingsForm from "@/components/settings/SettingsForm";
 import LambdaMd from "@/components/settings/LambdaMd";
+import StackSettings from "@/components/settings/StackSettings";
 import { getLambdaMd } from "@/lib/lambdamd";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +21,7 @@ export default function SettingsPage() {
       </p>
       <SettingsForm initial={settingsView(getSettings())} />
       <LambdaMd initial={getLambdaMd()} />
+      <StackSettings />
     </main>
   );
 }

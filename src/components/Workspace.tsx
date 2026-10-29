@@ -3,13 +3,19 @@
 import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import type { Feature, FeatureView, Job, JobKind, Piece } from "@/lib/types";
+import { featureMode, type Feature, type FeatureMode, type FeatureView, type Job, type JobKind, type Piece } from "@/lib/types";
 import { findPiece, firstPiece, isView, mergePieceView, pieceView, sortPieces } from "@/lib/pieces";
 import AskBar from "@/components/askbar/AskBar";
 import IntakeView from "@/components/intake/IntakeView";
+import { EdgeCasesCtx } from "@/components/flow/edgeCases";
+import StackPill from "@/components/stack/StackPill";
 import BriefTab from "./brief/BriefTab";
 import ContextTab from "./context/ContextTab";
 import FlowTab from "./flow/FlowTab";
+import { FEATURE_EVENT } from "./issues/api";
+import IssuesTab from "./issues/IssuesTab";
+import { FlagFeatureCtx } from "./issues/FlagButton";
+import { ago } from "./home/time";
 import { appDown } from "./mockup/api";
 import MockupTab from "./mockup/MockupTab";
 import { pieceAction } from "./pieces/api";
@@ -22,7 +28,7 @@ import VerifyTab from "./verify/VerifyTab";
 type TabProps = { feature: FeatureView; onChange: (f: FeatureView) => void };
 type TabDef = { key: string; label: string; job: JobKind | null; scope: "piece" | "feature"; n: (f: FeatureView) => number; C: React.ComponentType<TabProps> };
 
-// piece tabs (left) are about the selected PR; brief · context (right, after a divider) are the feature's
+// piece tabs (left) are about the selected piece (a PR; an area in understand mode); issues · brief · context (right, after a divider) are the feature's
 const TABS = [
   { key: "stories", label: "stories", job: "stories", scope: "piece", n: (f) => f.stories.length, C: StoriesTab },
   { key: "flows", label: "flows", job: "flows", scope: "piece", n: (f) => f.flowcharts.reduce((a, s) => a + s.charts.length, 0), C: FlowTab },
@@ -30,6 +36,7 @@ const TABS = [
   { key: "queues", label: "queues", job: "queues", scope: "piece", n: (f) => f.queues?.length ?? 0, C: QueuesTab },
   { key: "sketch", label: "ui sketch", job: "sketch", scope: "piece", n: (f) => f.mockups.length, C: MockupTab },
   { key: "verify", label: "verify", job: null, scope: "piece", n: (f) => f.runs.length, C: VerifyTab },
+  { key: "issues", label: "issues", job: null, scope: "feature", n: (f) => (f.issues ?? []).filter((i) => i.status === "open").length, C: IssuesTab },
   { key: "brief", label: "brief", job: null, scope: "feature", n: () => 0, C: BriefTab },
   { key: "context", label: "context", job: "context", scope: "feature", n: (f) => f.context.length, C: ContextTab },
 ] as const satisfies readonly TabDef[];
@@ -38,9 +45,16 @@ type TabKey = (typeof TABS)[number]["key"];
 type Tab = (typeof TABS)[number];
 const TAB_KEYS = TABS.map((t) => t.key) as string[];
 
-// schema + queues are per-piece visualizers: only when the piece needs them (or already has proposals)
-const shown = (f: FeatureView, k: TabKey) =>
-  k === "schema" ? !!f.needs?.schema || !!f.schema?.length : k === "queues" ? !!f.needs?.queues || !!f.queues?.length : true;
+// schema + queues are per-piece visualizers: only when the piece needs them (or already has proposals).
+// understand: schema always — it shows the tables the feature uses today (a cheap guess at "touches the db"
+// shouldn't hide them); queues diff a proposed change, so never
+const shown = (f: FeatureView, k: TabKey) => {
+  const build = featureMode(f) === "build";
+  if (k === "schema") return !build || !!f.needs?.schema || !!f.schema?.length;
+  if (k === "queues") return (build && !!f.needs?.queues) || !!f.queues?.length;
+  if (k === "issues") return !build; // collected while understanding, until a build starts from them
+  return true;
+};
 
 // fields each job writes; a finished job's fields are the only ones a poll may replace
 const OWNS: Record<JobKind, (keyof FeatureView)[]> = {
@@ -53,6 +67,8 @@ const OWNS: Record<JobKind, (keyof FeatureView)[]> = {
   queues: ["queues"],
   needs: ["needs", "flowcharts"],
   sketch: ["mockups"],
+  facts: [], // piece.facts arrives with server.pieces
+  check: ["stories", "flowcharts", "issues"], // fixes + unverified marks; understand issues (piece.check: server.pieces)
 };
 
 // a flow ref may be a set, chart, node, edge or edge case id → the chart card that holds it
@@ -70,29 +86,37 @@ function flowSelector(f: FeatureView, ref: string): string | null {
 const active = (j?: Job) => j?.status === "queued" || j?.status === "running";
 const jobOf = (f: FeatureView, k: JobKind) => f.jobs?.find((j) => j.kind === k);
 const POLL_MS = 1500;
+// per-mode header + generate copy (understand: sub-areas of an existing feature, not PRs)
+const COPY: Record<FeatureMode, { shaping: string; count: (n: number) => string; run: (multi: boolean) => string }> = {
+  build: { shaping: "shaping ·", count: (n) => (n === 1 ? "1 pr" : `${n} prs`), run: (m) => (m ? "generate this piece" : "generate everything") },
+  understand: { shaping: "mapping ·", count: (n) => (n === 1 ? "1 area" : `${n} areas`), run: (m) => (m ? "explain this area" : "explain everything") },
+};
 const UNDO_MS = 6000;
 const ease = [0.23, 1, 0.32, 1] as const;
 const isEmpty = (f: FeatureView) => !f.stories.length && !f.flowcharts.length && !f.jobs?.some((j) => j.kind !== "context");
 const anyLive = (f: Feature) => (f.jobs ?? []).some(active) || f.pieces.some((p) => (p.jobs ?? []).some(active));
 
-// "<piece id or ''>:<kind>" → finishedAt of a done job (finished jobs are what a poll may merge)
+// a job whose work landed: done, or a check that errored after committing its route pass
+const landed = (j: Job) => j.status === "done" || (j.status === "error" && j.kind === "check");
+// "<piece id or ''>:<kind>" → finishedAt of a landed job (finished jobs are what a poll may merge)
 function doneMap(f: Feature): Map<string, string | undefined> {
   const m = new Map<string, string | undefined>();
-  for (const j of f.jobs ?? []) m.set(`:${j.kind}`, j.status === "done" ? j.finishedAt : undefined);
-  for (const p of f.pieces ?? []) for (const j of p.jobs ?? []) m.set(`${p.id}:${j.kind}`, j.status === "done" ? j.finishedAt : undefined);
+  for (const j of f.jobs ?? []) m.set(`:${j.kind}`, landed(j) ? j.finishedAt : undefined);
+  for (const p of f.pieces ?? []) for (const j of p.jobs ?? []) m.set(`${p.id}:${j.kind}`, landed(j) ? j.finishedAt : undefined);
   return m;
 }
 
 // Holds the stored Feature. Tabs get a projection of the selected piece (?piece=, default first) and their
 // changes (views, or views straight from the api) are merged back with mergePieceView. While the feature
 // is in its intake conversation, the IntakeView owns the screen; the workspace fades in once it settles.
-export default function Workspace({ initial }: { initial: Feature }) {
+export default function Workspace({ initial, edgeCases = true }: { initial: Feature; edgeCases?: boolean }) {
   const [stored, setStored] = useState(initial);
   const intake = stored.phase === "intake";
   const reduce = useReducedMotion();
 
+  // the intake page is long and the hand-off button sits at its bottom: start the workspace at its header
   return (
-    // the intake page is long and the hand-off button sits at its bottom: start the workspace at its header
+    <EdgeCasesCtx.Provider value={edgeCases}>
     <AnimatePresence mode="wait" initial={false} onExitComplete={() => window.scrollTo({ top: 0 })}>
       {intake ? (
         <motion.div
@@ -113,6 +137,7 @@ export default function Workspace({ initial }: { initial: Feature }) {
         </motion.div>
       )}
     </AnimatePresence>
+    </EdgeCasesCtx.Provider>
   );
 }
 
@@ -133,6 +158,8 @@ function Shaped({ stored, setStored }: { stored: Feature; setStored: React.Dispa
   const piece = stored.pieces.find((p) => p.id === pieceId);
   const pieces = useMemo(() => sortPieces(stored.pieces), [stored.pieces]);
   const feature = useMemo(() => pieceView(stored, pieceId), [stored, pieceId]);
+  const understand = featureMode(stored) === "understand";
+  const copy = COPY[featureMode(stored)];
 
   const pid = useRef(pieceId);
   useEffect(() => {
@@ -229,6 +256,13 @@ function Shaped({ stored, setStored }: { stored: Feature; setStored: React.Dispa
     };
   }, [open, selectPiece]);
 
+  // an issue flagged deep inside a tab (src/components/issues/FlagButton) hands back the whole view
+  useEffect(() => {
+    const on = (e: Event) => setFeature((e as CustomEvent<FeatureView>).detail);
+    window.addEventListener(FEATURE_EVENT, on);
+    return () => window.removeEventListener(FEATURE_EVENT, on);
+  }, [setFeature]);
+
   const onFocus = useCallback((tab: string, ref?: string, piece?: string, note?: { scope?: string }) => {
     window.dispatchEvent(new CustomEvent("lambda:focus", { detail: { tab, ref, piece, scope: note?.scope } }));
   }, []);
@@ -263,8 +297,13 @@ function Shaped({ stored, setStored }: { stored: Feature; setStored: React.Dispa
         for (const k of mine) for (const field of OWNS[k]) (next as unknown as Record<string, unknown>)[field] = server[field];
         return mergePieceView(cur, sp, next);
       });
-      if (finished.length) {
-        const keys = finished.map((k) => (k.startsWith(":") ? `${sp}${k}` : k));
+      // the ✓ flash is for jobs that finished well (an errored check keeps its red dot)
+      const flashed = finished.filter((k) => {
+        const [p, kind] = k.split(":");
+        return (p ? server.pieces.find((x) => x.id === p)?.jobs : server.jobs)?.find((j) => j.kind === kind)?.status === "done";
+      });
+      if (flashed.length) {
+        const keys = flashed.map((k) => (k.startsWith(":") ? `${sp}${k}` : k));
         setFlash((x) => [...new Set([...x, ...keys])]);
         window.setTimeout(() => setFlash((x) => x.filter((k) => !keys.includes(k))), 1800);
       }
@@ -302,7 +341,7 @@ function Shaped({ stored, setStored }: { stored: Feature; setStored: React.Dispa
       setStarting(true);
       // optimistic: dots + tabs appear before the round trip
       setFeature((f) => {
-        const ks: JobKind[] = kinds ?? ["context", "stories", "flows", "needs", "sketch"];
+        const ks: JobKind[] = kinds ?? ["context", "facts", "stories", "flows", "needs", "sketch", "check"];
         const jobs = [...(f.jobs ?? []).filter((j) => !ks.includes(j.kind)), ...ks.map((kind): Job => ({ kind, status: "queued" }))];
         const needs =
           kinds?.includes("schema") || kinds?.includes("queues")
@@ -404,7 +443,7 @@ function Shaped({ stored, setStored }: { stored: Feature; setStored: React.Dispa
 
   // "app not running" is the sketch tab's own calm card, not an alarm up here
   const failed = (feature.jobs ?? []).filter((j) => j.status === "error" && !(j.kind === "sketch" && appDown(j)));
-  const ghosts = (["schema", "queues"] as const).filter((k) => !shown(feature, k));
+  const ghosts = understand ? [] : (["schema", "queues"] as const).filter((k) => !shown(feature, k));
   const multi = pieces.length > 1;
   const shaping = stored.phase === "shaping";
 
@@ -422,7 +461,7 @@ function Shaped({ stored, setStored }: { stored: Feature; setStored: React.Dispa
         onClick={() => open(t.key)}
         className={`relative flex shrink-0 items-center whitespace-nowrap px-3 pb-3 pt-2 text-sm transition-colors md:px-4 ${on ? "text-ink" : "text-grey hover:text-ink-2"}`}
       >
-        {t.label}
+        {understand && t.key === "sketch" ? "ui map" : t.label}
         {t.n(feature) > 0 && <span className="ml-1.5 font-mono text-[11px] text-grey">{t.n(feature)}</span>}
         <TabSignal job={j} flash={!!t.job && flash.includes(`${pieceId}:${t.job}`)} reduce={!!reduce} />
         {on && (
@@ -447,9 +486,13 @@ function Shaped({ stored, setStored }: { stored: Feature; setStored: React.Dispa
             </span>
           )}
           {/* phase, not the lifecycle status: "shaping" only while pieces are still generating */}
-          {shaping && <span>shaping ·</span>}
-          <span className={shaping ? "text-grey/70" : undefined}>{pieces.length === 1 ? "1 pr" : `${pieces.length} prs`}</span>
+          {understand && <span>understand ·</span>}
+          {shaping && <span>{copy.shaping}</span>}
+          <span className={shaping ? "text-grey/70" : undefined}>
+            {copy.count(pieces.length)}
+          </span>
         </span>
+        <StackPill featureId={feature.id} />
       </div>
       <h1 className="display break-words text-4xl md:text-6xl">{feature.title}</h1>
       <p className="mt-4 max-w-2xl text-[15px] leading-relaxed text-ink-2">{feature.brief}</p>
@@ -463,6 +506,7 @@ function Shaped({ stored, setStored }: { stored: Feature; setStored: React.Dispa
           onReorder={reorderPieces}
           onRemove={(id) => void removePiece(id)}
           onAdd={(t) => void addPiece(t)}
+          understand={understand}
         />
       )}
       <AnimatePresence initial={false} mode="popLayout">
@@ -479,6 +523,7 @@ function Shaped({ stored, setStored }: { stored: Feature; setStored: React.Dispa
           </motion.p>
         )}
       </AnimatePresence>
+      <Grounding key={pieceId} piece={piece} feature={feature} reduce={!!reduce} />
 
       {/* one obvious action for an empty piece; errors as retry chips */}
       <AnimatePresence initial={false}>
@@ -492,17 +537,17 @@ function Shaped({ stored, setStored }: { stored: Feature; setStored: React.Dispa
           >
             {isEmpty(feature) && (
               <button className="btn btn-primary" disabled={starting} onClick={() => run()}>
-                <span aria-hidden>✦</span> {multi ? "generate this piece" : "generate everything"}
+                <span aria-hidden>✦</span> {copy.run(multi)}
               </button>
             )}
             {failed.map((j) => (
               <button
                 key={j.kind}
                 title={j.error}
-                onClick={() => run([j.kind])}
+                onClick={() => run(retryKinds(feature, j))}
                 className="chip !border-bad/40 text-bad transition-transform active:scale-[0.97]"
               >
-                <span className="h-1.5 w-1.5 rounded-full bg-bad" /> {j.kind} failed · retry
+                <span className="h-1.5 w-1.5 rounded-full bg-bad" /> {RETRY[j.kind] ?? j.kind} failed · retry
               </button>
             ))}
             {pieceErr && (
@@ -535,6 +580,7 @@ function Shaped({ stored, setStored }: { stored: Feature; setStored: React.Dispa
       </div>
 
       {/* visited tabs stay mounted (inert + hidden) so in-flight model work keeps its state; piece tabs per piece */}
+      <FlagFeatureCtx.Provider value={feature}>
       <div className="relative pt-8">
         {tabs
           .filter((t) => visited.keys.includes(t.key) || t.key === current)
@@ -555,6 +601,7 @@ function Shaped({ stored, setStored }: { stored: Feature; setStored: React.Dispa
             );
           })}
       </div>
+      </FlagFeatureCtx.Provider>
 
       <PieceUndo undo={undo} onUndo={() => void restorePiece()} onDismiss={() => setUndo(null)} />
       <AskBar feature={feature} pieceId={pieceId} onChange={setFeature} onFocus={onFocus} />
@@ -600,6 +647,66 @@ function PieceUndo({ undo, onUndo, onDismiss }: { undo: { piece: Piece; at: numb
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+const RETRY: Partial<Record<JobKind, string>> = { facts: "code reading", check: "code check" };
+// a failed code read: stories / flows written after it weren't grounded → rewritten with the retry (the
+// server adds the check after)
+const retryKinds = (f: FeatureView, j: Job): JobKind[] => {
+  const failedAt = j.finishedAt;
+  if (j.kind !== "facts" || !failedAt) return [j.kind];
+  const after = (k: JobKind) => {
+    const w = jobOf(f, k);
+    return w?.status === "done" && !!w.finishedAt && w.finishedAt > failedAt;
+  };
+  return ["facts", ...(["stories", "flows"] as const).filter(after)];
+};
+
+// The piece's grounding, one quiet mono line: the facts session reading the code, then what it found and
+// how the stories / flows held up against it. Details in the title.
+function Grounding({ piece, feature, reduce }: { piece?: Piece; feature: FeatureView; reduce: boolean }) {
+  const facts = jobOf(feature, "facts");
+  const check = jobOf(feature, "check");
+  const f = piece?.facts;
+  const c = piece?.check;
+  const busy = active(facts) ? "reading the code…" : check?.status === "running" ? "checking against the code…" : null;
+  if (!busy && !f && !c) return null;
+  const read = f && !f.incomplete ? `grounded · ${f.routes.length} ${f.routes.length === 1 ? "screen" : "screens"}${f.sha ? ` · ${f.sha.slice(0, 7)}` : ""}` : null;
+  const factsTitle = f
+    ? f.incomplete
+      ? `code not read: ${f.incomplete}`
+      : [...f.routes.map((r) => `${r.path}${r.screen ? ` — ${r.screen}` : ""}`), ...f.notes].join("\n") || "nothing specific found"
+    : undefined;
+  const checkTitle = c
+    ? [`checked ${ago(c.at)}`, c.note, ...(c.flags ?? []).map((x) => `${x.kind} ${x.id}: ${x.why}`)].filter(Boolean).join("\n")
+    : undefined;
+  return (
+    <motion.p
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.18 }}
+      className="mt-2 flex flex-wrap items-center gap-x-2 font-mono text-[11px] text-grey"
+    >
+      {!active(facts) && read && <span title={factsTitle}>{read}</span>}
+      {!active(facts) && f?.incomplete && <span title={factsTitle}>code not read</span>}
+      {/* result first, then what runs */}
+      {busy && (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="relative grid h-2.5 w-2.5 place-items-center" aria-hidden>
+            {!reduce && <span className="absolute h-2.5 w-2.5 animate-ping rounded-full bg-lilac/70 [animation-duration:1.6s]" />}
+            <span className="relative h-1.5 w-1.5 rounded-full bg-lilac" />
+          </span>
+          <span title={(active(facts) ? facts : check)?.note}>{busy}</span>
+        </span>
+      )}
+      {c && !busy && (
+        <span title={checkTitle}>
+          {f ? "· " : ""}checked {c.ok} ok{c.fixed > 0 && ` · ${c.fixed} fixed`}
+          {c.flagged > 0 && <span className="text-warn"> · {c.flagged} flagged</span>}
+        </span>
+      )}
+    </motion.p>
   );
 }
 

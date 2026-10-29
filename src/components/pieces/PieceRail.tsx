@@ -7,6 +7,7 @@ import clsx from "clsx";
 import { sortPieces } from "@/lib/pieces";
 import type { Job, Piece } from "@/lib/types";
 import { PIECE_HOVER } from "./api";
+import { useEdgeCases } from "@/components/flow/edgeCases";
 
 const spring = { type: "spring", stiffness: 520, damping: 40 } as const;
 const live = (j: Job) => j.status === "queued" || j.status === "running";
@@ -19,6 +20,7 @@ export const pieceCounts = (p: Piece) => ({
 
 // Numbered build order: 1 send invite → 2 join + expiry → 3 resend/revoke. Click selects, drag reorders,
 // ⋯ renames / deletes, story tiles dropped on a card move there. Only rendered for 2+ pieces.
+// understand: sub-areas, not PRs — "·" between them and the drag sets reading order.
 export default function PieceRail({
   pieces,
   selected,
@@ -27,7 +29,9 @@ export default function PieceRail({
   onReorder,
   onRemove,
   onAdd,
+  understand = false,
 }: {
+  understand?: boolean;
   pieces: Piece[];
   selected: string;
   onSelect: (id: string) => void;
@@ -62,7 +66,7 @@ export default function PieceRail({
   const shownOrder = order.filter((id) => byId.has(id));
 
   return (
-    <nav aria-label="pieces" className="no-scrollbar -mx-4 mt-8 overflow-x-auto px-4 pb-1 md:mx-0 md:px-0">
+    <nav aria-label={understand ? "sub-areas, drag to set reading order" : "pieces"} className="no-scrollbar -mx-4 mt-8 overflow-x-auto px-4 pb-1 md:mx-0 md:px-0">
       <div className="flex w-max items-stretch gap-1.5">
         <Reorder.Group axis="x" values={shownOrder} onReorder={setOrder} as="ol" className="flex items-stretch gap-1.5">
           {shownOrder.map((id, i) => {
@@ -91,7 +95,7 @@ export default function PieceRail({
               >
                 {i > 0 && (
                   <span className="select-none text-grey/50" aria-hidden>
-                    →
+                    {understand ? "·" : "→"}
                   </span>
                 )}
                 <PieceCard
@@ -136,6 +140,7 @@ function PieceCard({
   const [editing, setEditing] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const c = pieceCounts(piece);
+  const edgeCases = useEdgeCases();
   const busy = (piece.jobs ?? []).some(live);
   const failed = (piece.jobs ?? []).some((j) => j.status === "error");
 
@@ -181,7 +186,7 @@ function PieceCard({
             <span className="truncate">
               {c.stories} {c.stories === 1 ? "story" : "stories"}
               {c.flows > 0 && ` · ${c.flows} flows`}
-              {c.open > 0 && <span className="text-warn"> · {c.open} open</span>}
+              {edgeCases && c.open > 0 && <span className="text-warn"> · {c.open} open</span>}
             </span>
           </span>
         </span>

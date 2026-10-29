@@ -13,7 +13,7 @@ async function call<T>(url: string, init?: RequestInit): Promise<{ data: T; res:
 
 const base = (fid: string) => `/api/features/${fid}/mockups`;
 
-export async function captureMockup(fid: string, body: { url?: string; path?: string; accountId?: string; intent?: string; pieceId?: string }) {
+export async function captureMockup(fid: string, body: { url?: string; path?: string; accountId?: string; intent?: string; pieceId?: string; viewport?: string }) {
   const { data, res } = await call<FeatureView>(base(fid), { method: "POST", body: JSON.stringify(body) });
   const warn = res.headers.get("x-sketch-error");
   return { feature: data, sketchError: warn ? decodeURIComponent(warn) : undefined };

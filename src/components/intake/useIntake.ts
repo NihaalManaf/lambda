@@ -47,6 +47,11 @@ export function useIntake(feature: AnyFeature, onChange: (f: AnyFeature) => void
   const [skipping, setSkipping] = useState(false);
   const [skipError, setSkipError] = useState<string | null>(null);
   const [repo, setRepo] = useState<string | null | undefined>(undefined);
+  const [base, setBase] = useState<string | null>(null); // the resolved base branch (null = unknown)
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshNote, setRefreshNote] = useState<{ text: string; error?: boolean } | null>(null);
+  const noteTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(noteTimer.current), []);
   const busyRef = useRef(false);
   const changeRef = useRef(onChange);
   useEffect(() => {
@@ -76,6 +81,7 @@ export function useIntake(feature: AnyFeature, onChange: (f: AnyFeature) => void
       const text = raw.trim();
       if (!text || busyRef.current) return;
       busyRef.current = true;
+      setRefreshNote(null);
       setPending({ user: text, text: "", trace: "", asks: [], base: threadLen.current });
       let finished = false;
       try {
@@ -115,9 +121,10 @@ export function useIntake(feature: AnyFeature, onChange: (f: AnyFeature) => void
   useEffect(() => {
     let stop = false;
     void (async () => {
-      const s = await fetch(`/api/features/${fid}/intake`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      const s = await fetch(`/api/features/${fid}/intake?base=1`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
       if (stop || !s) return;
       setRepo(s.repo ?? null);
+      setBase(s.base ?? null);
       if (!s.live || busyRef.current) return;
       setAttached(true);
       setPending({ text: s.text ?? "", trace: s.trace ?? "", asks: [], base: threadLen.current });
@@ -155,5 +162,37 @@ export function useIntake(feature: AnyFeature, onChange: (f: AnyFeature) => void
 
   const dismiss = useCallback(() => setPending(null), []);
 
-  return { pending, busy: (!!pending && !pending.error) || attached, send, stop, skip, skipping, skipError, brief, settled, dismiss, repo };
+  // build: move the feature's pinned checkout to the latest base tip
+  const refresh = useCallback(async () => {
+    if (refreshing || busyRef.current) return;
+    setRefreshing(true);
+    setRefreshNote(null);
+    const res = await fetch(`/api/features/${fid}/intake/refresh`, { method: "POST" }).catch(() => null);
+    const body = (await res?.json().catch(() => null)) as { feature?: AnyFeature; moved?: boolean; status?: string; error?: string } | null;
+    if (res?.ok && body?.feature) {
+      absorb(body.feature);
+      setRefreshNote({ text: body.status ?? (body.moved ? "updated" : "already latest") });
+    } else setRefreshNote({ text: body?.error ?? "couldn't refresh", error: true });
+    setRefreshing(false);
+    clearTimeout(noteTimer.current);
+    noteTimer.current = setTimeout(() => setRefreshNote(null), 6000);
+  }, [fid, refreshing, absorb]);
+
+  return {
+    pending,
+    busy: (!!pending && !pending.error) || attached,
+    send,
+    stop,
+    skip,
+    skipping,
+    skipError,
+    brief,
+    settled,
+    dismiss,
+    repo,
+    base,
+    refresh,
+    refreshing,
+    refreshNote,
+  };
 }

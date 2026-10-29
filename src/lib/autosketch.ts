@@ -7,7 +7,7 @@ import { featurePrompt, generate } from "./llm";
 import { pieceView } from "./pieces";
 import { planSketch } from "./sketch";
 import { getSettings, id, now } from "./store";
-import type { Feature, FeatureView, Mockup, Piece } from "./types";
+import { featureMode, type Feature, type FeatureView, type Mockup, type Piece } from "./types";
 
 // The background "sketch" job: pick 1..3 real screens this piece touches, screenshot them in the running
 // app, and mark them up. Runs after the piece's stories (their acceptance startPaths are the routes we know exist).
@@ -44,14 +44,17 @@ export const shotPath = (t: Target) => (t.newScreen && t.parentPath ? t.parentPa
 
 // Routes we have seen exist: every story's acceptance startPath (all pieces), routes captured by hand,
 // and brief surfaces that are routes. The piece's own startPaths come first.
-export function observedRoutes(f: Feature | FeatureView, piece: Pick<Piece, "stories">): string[] {
+export function observedRoutes(f: Feature | FeatureView, piece: Pick<Piece, "stories" | "facts">): string[] {
   const out: string[] = [];
   const add = (p: string) => {
     const n = normPath(p);
     if (n && !out.includes(n)) out.push(n);
   };
-  for (const s of piece.stories) for (const a of s.acceptance) add(a.startPath);
-  for (const p of f.pieces ?? []) for (const s of p.stories) for (const a of s.acceptance) add(a.startPath);
+  // a startPath the check stage couldn't find in the code is a guess, not a route
+  for (const s of piece.stories) for (const a of s.acceptance) if (!a.unverified) add(a.startPath);
+  // screens the facts session read for this piece (concrete ones: a [param] can't be opened)
+  for (const r of piece.facts?.routes ?? []) if (!r.path.includes("[")) add(r.path);
+  for (const p of f.pieces ?? []) for (const s of p.stories) for (const a of s.acceptance) if (!a.unverified) add(a.startPath);
   for (const p of f.pieces ?? [])
     for (const m of p.mockups.filter((x) => !x.auto)) // a page a person captured; the job's own sketches prove nothing
       try {
@@ -121,6 +124,18 @@ const Out = z.object({
     .describe("1-3 screens, most important first"),
 });
 
+// understand: existing screens only, so no newScreen / parentPath (defaulted in code)
+const OutUnderstand = z.object({
+  targets: z
+    .array(
+      z.object({
+        path: z.string().describe("an existing route, e.g. /settings/members"),
+        intent: z.string().describe("<= 15 words: what this screen shows of the feature, for the marker"),
+      }),
+    )
+    .describe("1-3 screens, most important first"),
+});
+
 // routes: what the live app answered for (existing) vs 404'd (missing: stories name screens that don't exist
 // yet). Without it, every observed route counts as existing.
 export async function pickTargets(
@@ -138,6 +153,23 @@ export async function pickTargets(
   const stories = piece.stories
     .map((s) => `- as ${s.role}, ${s.want}${s.acceptance.length ? ` (starts at ${[...new Set(s.acceptance.map((a) => a.startPath))].join(", ")})` : ""}`)
     .join("\n");
+  // understand: only screens that exist today; a 404 story route is a wrong story, not a new screen
+  if (featureMode(f) === "understand") {
+    const prompt = `${featurePrompt(view)}
+
+sub-area: ${piece.title}${piece.why ? ` — ${piece.why}` : ""}${piece.scope?.length ? `\nscope:\n${piece.scope.map((s) => `- ${s}`).join("\n")}` : ""}${
+      f.briefDoc?.surfaces.length ? `\nlives in: ${f.briefDoc.surfaces.join(", ")}` : ""
+    }
+stories:
+${stories || "(none yet)"}
+
+routes that exist in the running app (only these can be screenshotted):
+${allowed.map((r) => `- ${r}`).join("\n")}
+
+pick 1-3 screens where this feature lives today. use only the routes listed.`;
+    const out = await generate({ schema: OutUnderstand, prompt, effort: "low", maxTokens: 1200, signal: opts.signal, mode: "understand" });
+    return shapeTargets(out.targets.map((t) => ({ ...t, newScreen: false, parentPath: "" })), allowed, fallback);
+  }
   const prompt = `${featurePrompt(view)}
 
 piece: ${piece.title}${piece.why ? ` — ${piece.why}` : ""}${piece.scope?.length ? `\nscope:\n${piece.scope.map((s) => `- ${s}`).join("\n")}` : ""}${
@@ -242,7 +274,12 @@ export async function autoSketch(
   const signal = ac.signal;
   try {
     const settings = getSettings();
-    const base = settings.frontendUrl;
+    // lambda's own running frontend when its stack is up, else the configured app url
+    // (with an approved stack plan it never falls back to the developer's own server: AppDown instead)
+    const base = await import("./stack").then(
+      (m) => m.appBase(settings).catch((e: unknown) => Promise.reject(new AppDown(e instanceof Error ? e.message : String(e)))),
+      () => settings.frontendUrl,
+    );
     if (!(await reachable(base))) throw new AppDown(`app not running at ${base}`);
     const other = await wrongApp(base, settings.repoPath);
     if (other) throw new AppDown(other); // another repo's dev server owns the port
@@ -254,7 +291,12 @@ export async function autoSketch(
     if (!targets.length) {
       const own = observedRoutes({ ...f, pieces: [] } as Feature, piece).filter((r) => routes.missing.includes(r));
       const gone = own[0] ?? routes.missing[0];
-      return { mockups: [], skipped: [gone ? `no existing screen for ${gone} yet (404) — sketch after the route exists` : "no screen to sketch yet"] };
+      // understand: the feature exists, so a 404 means the stories name the wrong route, not an unbuilt screen
+      const why =
+        featureMode(f) === "understand"
+          ? gone ? `${gone} answered 404 — the route in the stories may be wrong` : "no matching screen found in the running app"
+          : gone ? `no existing screen for ${gone} yet (404) — sketch after the route exists` : "no screen to sketch yet";
+      return { mockups: [], skipped: [why] };
     }
 
     const acc = settings.accounts[0];
@@ -304,6 +346,7 @@ export async function autoSketch(
         thumb: cap.thumb,
         width: cap.width,
         height: cap.height,
+        fold: cap.fold,
         elements: cap.elements,
         annotations: [],
         intent: t.intent,

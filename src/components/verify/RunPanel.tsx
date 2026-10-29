@@ -1,6 +1,7 @@
 "use client";
 
 import { asA } from "@/components/stories/bits";
+import FlagButton from "@/components/issues/FlagButton";
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import clsx from "clsx";
@@ -62,6 +63,16 @@ export default function RunPanel({ run, story, onCancel }: { run: Run; story?: S
       <div className="flex items-center gap-3 border-b border-line px-5 py-3.5">
         <StatusPill status={run.status} />
         <span className="font-mono text-[12px] text-grey">{elapsed}</span>
+        {(run.status === "failed" || run.status === "error") && (
+          <FlagButton
+            refTo={{ tab: "verify", id: run.id, label: (story?.want ?? "browser check").slice(0, 60) }}
+            title={run.summary || `check failed: ${story?.want ?? "browser check"}`}
+            detail={[story && `story: ${story.want}`, ...(run.failures ?? [])].filter(Boolean).join("\n")}
+            source="verify"
+            label="log as issue"
+            className="ml-auto"
+          />
+        )}
         {active && (
           <button
             className="btn btn-ghost ml-auto !py-1 !text-[12px]"

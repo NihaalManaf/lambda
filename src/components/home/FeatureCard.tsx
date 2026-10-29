@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import clsx from "clsx";
-import type { Feature, FeatureStatus } from "@/lib/types";
+import { featureMode, type Feature, type FeatureStatus } from "@/lib/types";
 import { allRuns, allStories } from "@/lib/pieces";
 import { ago } from "./time";
 
@@ -25,10 +25,12 @@ export function FeatureCard({ f, onDelete }: { f: Feature; onDelete: () => void 
     return () => clearTimeout(t);
   }, [arm]);
 
+  const understand = featureMode(f) === "understand";
+  const openIssues = (f.issues ?? []).filter((i) => i.status === "open").length;
   const stories = allStories(f);
   const passing = stories.filter((s) => s.status === "passing").length;
   const counts: [string, number][] = [
-    ...(f.pieces.length > 1 ? [["pieces", f.pieces.length] as [string, number]] : []),
+    ...(f.pieces.length > 1 ? [[understand ? "areas" : "pieces", f.pieces.length] as [string, number]] : []),
     ["stories", stories.length],
     ["flows", f.pieces.reduce((n, p) => n + p.flowcharts.reduce((m, s) => m + s.charts.length, 0), 0)],
     ["sketches", f.pieces.reduce((n, p) => n + p.mockups.length, 0)],
@@ -44,7 +46,15 @@ export function FeatureCard({ f, onDelete }: { f: Feature; onDelete: () => void 
       <Link href={`/f/${f.id}`} className="absolute inset-0 rounded-[18px]" aria-label={f.title} />
 
       <div className="flex items-center justify-between">
-        <span className={clsx("chip", STATUS[f.status])}>{f.status}</span>
+        {/* understand features never build: a lifecycle chip would read "shaping" forever */}
+        <div className="flex min-w-0 items-center gap-3">
+          {understand ? <span className="chip text-grey">understand</span> : <span className={clsx("chip", STATUS[f.status])}>{f.status}</span>}
+          {understand && openIssues > 0 && (
+            <span className="chip text-warn" title="open issues: what to fix or extend">
+              {openIssues} issue{openIssues > 1 ? "s" : ""}
+            </span>
+          )}
+        </div>
         <button
           type="button"
           onClick={() => (arm ? onDelete() : setArm(true))}
@@ -75,7 +85,7 @@ export function FeatureCard({ f, onDelete }: { f: Feature; onDelete: () => void 
       {f.brief && <p className="mt-2 line-clamp-1 text-sm text-grey">{f.brief}</p>}
 
       <div className="mt-auto pt-6">
-        {stories.length > 0 && (
+        {stories.length > 0 && !understand && (
           <div className="mb-4 h-1 overflow-hidden rounded-full bg-paper-2">
             <motion.div
               className="h-full rounded-full bg-ok"

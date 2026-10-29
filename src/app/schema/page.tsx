@@ -1,5 +1,8 @@
 import { getHead } from "@/lib/schema/replay";
 import SchemaExplorer from "@/components/schema/SchemaExplorer";
+import SchemaWithAsk from "@/components/schema/SchemaWithAsk";
+import { findPiece } from "@/lib/pieces";
+import { getFeature } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "schema · lambda" };
@@ -8,6 +11,10 @@ const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
 export default async function SchemaPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const sp = await searchParams;
+  // opened from a feature: keep its ask bar here
+  const fid = one(sp.feature);
+  const feature = fid && /^[\w-]{1,64}$/.test(fid) ? getFeature(fid) : undefined;
+  const piece = feature ? (findPiece(feature, one(sp.piece)) ?? feature.pieces[0]) : undefined;
   let head: Awaited<ReturnType<typeof getHead>> | null = null;
   let error = "";
   try {
@@ -27,7 +34,11 @@ export default async function SchemaPage({ searchParams }: { searchParams: Promi
         </div>
       </div>
       {head && head.migrations.length + head.tables.length > 0 ? (
-        <SchemaExplorer head={head} initialTable={one(sp.table)} initialMigration={one(sp.m)} />
+        feature ? (
+          <SchemaWithAsk head={head} initialTable={one(sp.table)} initialMigration={one(sp.m)} feature={feature} pieceId={piece?.id ?? ""} />
+        ) : (
+          <SchemaExplorer head={head} initialTable={one(sp.table)} initialMigration={one(sp.m)} />
+        )
       ) : (
         <div className="card flex flex-col items-center py-16 text-center">
           <div className="display text-3xl">

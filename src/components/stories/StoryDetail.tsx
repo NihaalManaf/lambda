@@ -8,6 +8,7 @@ import type { Acceptance, Piece, Story, VerificationRun } from "@/lib/types";
 import { CriterionForm, GWT } from "./Compose";
 import { Icon, Inline, LIVE, LiveIcon, Meter, RoleChip, ago, asA, type Live } from "./bits";
 import { tileSpring } from "./StoryTile";
+import FlagButton from "@/components/issues/FlagButton";
 
 // Expanded story: shares layoutId with its tile. Spec (what you write) is visually separate from
 // the result (what the last browser run found). Nothing here is a checkbox.
@@ -91,6 +92,7 @@ export default function StoryDetail({
                 <Inline value={story.role} onCommit={(role) => upd({ role })} label="role" className="text-[13px] font-semibold text-ink" />
               </RoleChip>
             </span>
+            <FlagButton refTo={{ tab: "stories", id: story.id, label: story.want.slice(0, 60) }} title={`story: ${story.want}`.slice(0, 120)} className="ml-auto" />
             <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-full text-grey transition-colors hover:bg-paper-2 hover:text-ink" aria-label="close">
               <Icon name="close" />
             </button>
@@ -290,6 +292,12 @@ function Criterion({
             className="!mx-0 hover:!bg-ink-2 focus:!bg-ink-2"
           />
         </span>
+        {/* the check stage couldn't back it with the code; editing the route or steps clears it */}
+        {a.unverified && (
+          <span className="truncate font-mono text-[10.5px] text-warn" title={a.unverified}>
+            {a.unverified.startsWith("route ") ? "unverified route" : "unverified"}
+          </span>
+        )}
         <button
           onClick={() => (editing ? save() : (setText(a.steps.join("\n")), setEditing(true)))}
           className="ml-auto inline-flex items-center gap-1 font-mono text-[11px] text-grey transition-colors hover:text-ink"

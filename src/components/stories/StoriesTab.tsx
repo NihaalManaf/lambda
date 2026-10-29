@@ -55,6 +55,9 @@ export default function StoriesTab({ feature, onChange }: { feature: FeatureView
   // the background "stories" job (auto-generation on create) drives the same loader as a manual generate
   const storiesJob = feature.jobs?.find((j) => j.kind === "stories");
   const jobBusy = storiesJob?.status === "queued" || storiesJob?.status === "running";
+  // stories wait on the facts session reading the code first
+  const factsJob = feature.jobs?.find((j) => j.kind === "facts");
+  const reading = storiesJob?.status === "queued" && (factsJob?.status === "queued" || factsJob?.status === "running");
   const live = useMemo(() => {
     const m = new Map<string, Live>();
     for (const s of feature.stories) m.set(s.id, liveOf(s, lastRun(feature, s.id)));
@@ -67,14 +70,24 @@ export default function StoriesTab({ feature, onChange }: { feature: FeatureView
     return [...c].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "user";
   }, [feature.stories]);
 
+  // a regenerate asked here: say so when its background job lands
+  const asked = useRef(false);
+  useEffect(() => {
+    if (!asked.current || (storiesJob?.status !== "done" && storiesJob?.status !== "error")) return;
+    asked.current = false;
+    if (storiesJob.status === "done") notify("stories ready", `${feature.stories.length} tiles for ${feature.title}`);
+  }, [storiesJob?.status, storiesJob?.finishedAt, feature.stories.length, feature.title]);
+
   const run = async (kind: "generate") => {
+    asked.current = true;
     setBusy(kind);
     setErr(null);
     try {
+      // a background job now (facts first when missing, checked against the code after): the poll brings them
       const f = await storiesApi.generate(fid, feature.pieceId);
       onChange(f);
-      notify("stories ready", `${f.stories.length} tiles for ${f.title}`);
     } catch (e) {
+      asked.current = false;
       setErr((e as Error).message);
     } finally {
       setBusy(null);
@@ -190,12 +203,14 @@ export default function StoriesTab({ feature, onChange }: { feature: FeatureView
         </AnimatePresence>
 
         {busy === "generate" || (jobBusy && !stories.length) ? (
-          <Writing startedAt={jobBusy ? storiesJob?.startedAt : undefined} />
+          <Writing startedAt={reading ? factsJob?.startedAt : jobBusy ? storiesJob?.startedAt : undefined} label={reading ? "reading the code" : undefined} />
         ) : !showBoard ? (
           <EmptyState onGenerate={() => run("generate")} onWrite={() => setCompose("must")} />
         ) : (
           <LayoutGroup>
-            <div className="flex justify-end gap-2">
+            <div className="flex items-center justify-end gap-2">
+              {/* old tiles stay while the job rewrites them (facts → stories → check) */}
+              {jobBusy && <span className="mr-auto font-mono text-[11px] text-grey">{reading ? "reading the code…" : "rewriting…"}</span>}
               <button className="btn btn-ghost" onClick={() => run("generate")} disabled={!!busy || jobBusy}>
                 regenerate
               </button>
@@ -395,10 +410,10 @@ function EmptyState({ onGenerate, onWrite }: { onGenerate: () => void; onWrite: 
   );
 }
 
-function Writing({ startedAt }: { startedAt?: string }) {
+function Writing({ startedAt, label = "writing stories" }: { startedAt?: string; label?: string }) {
   return (
     <div className="flex justify-center py-6">
-      <Scribe label="writing stories" startedAt={startedAt} labelAt="top" />
+      <Scribe label={label} startedAt={startedAt} labelAt="top" />
     </div>
   );
 }

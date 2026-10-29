@@ -3,24 +3,32 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
-import type { FeatureView, IconName, Risk } from "@/lib/types";
+import { featureMode, type FeatureView, type IconName, type Risk, type SchemaFocus } from "@/lib/types";
 import type { MigrationView, SchemaProposal } from "@/lib/schema/types";
+import type { FocusView } from "@/lib/schema/focus";
 import { notify } from "@/lib/desktop";
 import { Icon } from "@/components/viz/icons";
 import DiffLegend from "@/components/viz/DiffLegend";
 import RiskList from "@/components/viz/RiskList";
 import ShowSource from "@/components/viz/ShowSource";
 import Sculptor from "@/components/Sculptor";
+import FlagButton from "@/components/issues/FlagButton";
 import Erd from "./Erd";
 import ProposalComposer, { type ProposalBody } from "./ProposalComposer";
 
 // FeatureView tab: describe a schema change (or hand over SQL / repo files) → see it drawn on the live schema.
+// understand: no changes — the tables the feature uses today, at head, with what each is for.
 
 const spring = { type: "spring", stiffness: 420, damping: 36 } as const;
 const SOURCE: Record<SchemaProposal["source"], IconName> = { llm: "bolt", sql: "file", git: "split" };
 type View = MigrationView & { stale: boolean };
 
 export default function SchemaTab({ feature, onChange }: { feature: FeatureView; onChange: (f: FeatureView) => void }) {
+  if (featureMode(feature) === "understand") return <CurrentSchema feature={feature} />;
+  return <Proposals feature={feature} onChange={onChange} />;
+}
+
+function Proposals({ feature, onChange }: { feature: FeatureView; onChange: (f: FeatureView) => void }) {
   const [pending, setPending] = useState<ProposalBody | null>(null);
   const [error, setError] = useState<string | null>(null);
   const base = `/api/features/${feature.id}/schema`;
@@ -80,7 +88,7 @@ export default function SchemaTab({ feature, onChange }: { feature: FeatureView;
       <AnimatePresence initial={false} mode="popLayout">
         {pending && <Drafting key="pending" />}
         {proposals.map((p) => (
-          <ProposalCard key={p.id} featureId={feature.id} p={p} onDelete={() => remove(p.id)} />
+          <ProposalCard key={p.id} featureId={feature.id} pieceId={feature.pieceId} p={p} onDelete={() => remove(p.id)} />
         ))}
       </AnimatePresence>
 
@@ -96,7 +104,7 @@ export default function SchemaTab({ feature, onChange }: { feature: FeatureView;
   );
 }
 
-function ProposalCard({ featureId, p, onDelete }: { featureId: string; p: SchemaProposal; onDelete: () => void }) {
+function ProposalCard({ featureId, pieceId, p, onDelete }: { featureId: string; pieceId: string; p: SchemaProposal; onDelete: () => void }) {
   const router = useRouter();
   const [view, setView] = useState<{ key: string; v: View | null; error?: string } | null>(null);
   const [hover, setHover] = useState<string | null>(null);
@@ -125,7 +133,7 @@ function ProposalCard({ featureId, p, onDelete }: { featureId: string; p: Schema
     const b = (await r.json()) as Partial<View>;
     return b.sql ?? "";
   }, [p.sql, url]);
-  const openTable = useCallback((id: string) => router.push(`/schema?table=${encodeURIComponent(id)}`), [router]);
+  const openTable = useCallback((id: string) => router.push(schemaHref(id, featureId, pieceId)), [router, featureId, pieceId]);
   const focus = (r: Risk) => setHover((h) => (h === r.id ? null : r.id));
 
   return (
@@ -193,5 +201,113 @@ function Drafting() {
     >
       <Sculptor label="drafting the schema" size="sm" />
     </motion.section>
+  );
+}
+
+type Focus = FocusView & { focus: SchemaFocus };
+
+// the schema page, with this feature's ask bar
+const schemaHref = (table: string, fid: string, pid: string) =>
+  `/schema?table=${encodeURIComponent(table)}&feature=${encodeURIComponent(fid)}${pid ? `&piece=${encodeURIComponent(pid)}` : ""}`;
+
+function CurrentSchema({ feature }: { feature: FeatureView }) {
+  const router = useRouter();
+  const url = `/api/features/${feature.id}/schema/current?piece=${encodeURIComponent(feature.pieceId)}`;
+  const [state, setState] = useState<{ url: string; v: Focus | null; error?: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [hover, setHover] = useState<string | null>(null);
+  const v = state?.url === url ? state.v : null;
+  const failed = state?.url === url ? state.error : undefined;
+
+  const load = useCallback(
+    async (method: "GET" | "POST") => {
+      const r = await fetch(url, { method });
+      const b = await r.json();
+      if (!r.ok) throw new Error(b.error ?? r.statusText);
+      return b as Focus;
+    },
+    [url],
+  );
+  useEffect(() => {
+    let live = true;
+    load("GET")
+      .then((b) => live && setState({ url, v: b }))
+      .catch((e) => live && setState({ url, v: null, error: e instanceof Error ? e.message : "failed" }));
+    return () => {
+      live = false;
+    };
+  }, [load, url]);
+  async function repick() {
+    setBusy(true);
+    try {
+      setState({ url, v: await load("POST") });
+    } catch (e) {
+      setState({ url, v, error: e instanceof Error ? e.message : "failed" });
+    } finally {
+      setBusy(false);
+    }
+  }
+  const openTable = useCallback((id: string) => router.push(schemaHref(id, feature.id, feature.pieceId)), [router, feature.id, feature.pieceId]);
+
+  if (!v)
+    return failed ? (
+      <div className="flex flex-col items-center py-16 text-center">
+        <div className="display text-3xl">
+          no <span className="outlined">schema</span>
+        </div>
+        <p className="mt-2 text-[13px] text-grey">{failed} · check the migrations folder in settings</p>
+      </div>
+    ) : (
+      <div className="flex justify-center py-8">
+        <Sculptor label="finding its tables" size="sm" />
+      </div>
+    );
+
+  const tables = v.focus.tables.filter((t) => v.history[t.id]);
+  return (
+    <section className="card overflow-hidden">
+      <header className="flex items-center gap-3 border-b border-line px-5 py-3">
+        <h3 className="display min-w-0 flex-1 truncate text-2xl">tables it uses today</h3>
+        {v.stale && (
+          <span className="chip !border-warn/60 text-warn" title="migrations changed since these were picked">
+            <Icon name="clock" size={11} /> stale
+          </span>
+        )}
+        <button type="button" onClick={repick} disabled={busy} className="chip transition-transform duration-150 active:scale-[0.97] disabled:opacity-50">
+          {busy ? "picking…" : "re-pick"}
+        </button>
+      </header>
+      {tables.length ? (
+        <div className="flex flex-col md:flex-row">
+          <div className="relative min-w-0 flex-1">
+            <Erd graph={v.graph} hover={hover} onHover={setHover} onOpenTable={openTable} />
+          </div>
+          <aside className="flex w-full min-w-0 flex-col gap-4 border-t border-line p-4 md:w-80 md:shrink-0 md:border-l md:border-t-0">
+            {tables.map((t) => (
+              <div key={t.id} onMouseEnter={() => setHover(t.id)} onMouseLeave={() => setHover(null)}>
+                <div className="flex items-center justify-between gap-2">
+                  <button type="button" onClick={() => openTable(t.id)} className="font-mono text-[12.5px] text-ink hover:underline">
+                    {t.id.replace(/^public\./, "")}
+                  </button>
+                  <FlagButton refTo={{ tab: "schema", id: t.id, label: t.id.replace(/^public\./, "") }} title={`table ${t.id.replace(/^public\./, "")}`} detail={t.role || undefined} label="" />
+                </div>
+                {t.role && <p className="mt-0.5 text-[13px] leading-snug text-ink-2">{t.role}</p>}
+                {v.history[t.id].length > 0 && (
+                  <p className="mt-1 font-mono text-[10.5px] leading-relaxed text-grey" title={v.history[t.id].map((m) => m.id).join("\n")}>
+                    {v.history[t.id]
+                      .slice(0, 3)
+                      .map((m) => `${m.date} ${m.title}`)
+                      .join(" · ")}
+                    {v.history[t.id].length > 3 ? ` · +${v.history[t.id].length - 3}` : ""}
+                  </p>
+                )}
+              </div>
+            ))}
+          </aside>
+        </div>
+      ) : (
+        <p className="px-5 py-10 text-center text-[13px] text-grey">no tables matched this feature · re-pick, or ask the chat which tables it touches</p>
+      )}
+    </section>
   );
 }

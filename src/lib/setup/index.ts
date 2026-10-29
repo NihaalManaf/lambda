@@ -92,6 +92,7 @@ export async function apply(body: ApplyBody, o: Partial<SetupCtx> = {}): Promise
   const r = await detectRepo(root, ctx);
   const cur = getSettings();
   const patch: Partial<Settings> = { repoPath: root };
+  if (cur.repoPath && cur.repoPath !== root) patch.baseBranch = ""; // a base of the old repo means nothing here
 
   // env file: explicit (validated), explicit "" (none), else the detected best
   if (body.envPath === "") patch.envPath = "";

@@ -2,14 +2,17 @@
 
 import { motion, useReducedMotion } from "motion/react";
 import clsx from "clsx";
-import type { Brief } from "@/lib/types";
+import type { Brief, FeatureMode } from "@/lib/types";
 
 const ease = [0.23, 1, 0.32, 1] as const;
 
 // The settled intake brief, visually: summary · roles · in / out · decisions · pieces.
 // Sections rise in with a short stagger (rare view: the moment the intake lands, or the brief tab).
-export default function BriefCard({ brief, compact, className }: { brief: Brief; compact?: boolean; className?: string }) {
+// understand: same fields, read as-is (where it lives today, sub-areas in reading order, no PRs).
+export default function BriefCard({ brief, compact, className, mode = "build" }: { brief: Brief; compact?: boolean; className?: string; mode?: FeatureMode }) {
   const reduce = useReducedMotion();
+  const u = mode === "understand";
+  const n = brief.pieces.length;
   const rise = (i: number) => ({
     initial: { opacity: 0, transform: reduce ? "none" : "translateY(6px)" },
     animate: { opacity: 1, transform: "translateY(0px)" },
@@ -35,14 +38,14 @@ export default function BriefCard({ brief, compact, className }: { brief: Brief;
 
       {(brief.inScope.length > 0 || brief.outOfScope.length > 0) && (
         <motion.div {...rise(2)} className="grid gap-4 md:grid-cols-2">
-          <ScopeList label="in" items={brief.inScope} />
-          <ScopeList label="out" items={brief.outOfScope} muted />
+          <ScopeList label={u ? "covers" : "in"} items={brief.inScope} />
+          <ScopeList label={u ? "not covered" : "out"} items={brief.outOfScope} muted />
         </motion.div>
       )}
 
       {brief.decisions.length > 0 && (
         <motion.div {...rise(3)}>
-          <div className="eyebrow mb-2">settled</div>
+          <div className="eyebrow mb-2">{u ? "how it works" : "settled"}</div>
           <ul className="divide-y divide-line rounded-2xl bg-paper-2/70">
             {brief.decisions.map((d, i) => (
               <li key={i} className="grid grid-cols-1 gap-x-3 gap-y-0.5 px-3.5 py-2.5 text-[13px] md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
@@ -59,13 +62,15 @@ export default function BriefCard({ brief, compact, className }: { brief: Brief;
 
       {brief.pieces.length > 0 && (
         <motion.div {...rise(4)}>
-          <div className="eyebrow mb-2">{brief.pieces.length === 1 ? "1 piece · 1 pr" : `${brief.pieces.length} pieces · 1 pr each`}</div>
+          <div className="eyebrow mb-2">
+            {u ? (n === 1 ? "1 area" : `${n} areas · reading order`) : n === 1 ? "1 piece · 1 pr" : `${n} pieces · 1 pr each`}
+          </div>
           <ol className="flex flex-wrap items-stretch gap-2">
             {brief.pieces.map((p, i) => (
               <li key={i} className="flex min-w-0 items-center gap-2">
                 {i > 0 && (
                   <span className="text-grey/60" aria-hidden>
-                    →
+                    {u ? "·" : "→"}
                   </span>
                 )}
                 <div className="min-w-0 max-w-[320px] rounded-2xl border border-line bg-card px-3 py-2">
@@ -85,7 +90,7 @@ export default function BriefCard({ brief, compact, className }: { brief: Brief;
         <motion.div {...rise(5)} className="grid gap-4 md:grid-cols-2">
           {brief.surfaces.length > 0 && (
             <div>
-              <div className="eyebrow mb-2">touches</div>
+              <div className="eyebrow mb-2">{u ? "lives in" : "touches"}</div>
               <div className="flex flex-wrap gap-1.5">
                 {brief.surfaces.map((s) => (
                   <span key={s} className="rounded-md bg-paper-2 px-1.5 py-0.5 font-mono text-[11px] text-ink-2">
@@ -97,7 +102,7 @@ export default function BriefCard({ brief, compact, className }: { brief: Brief;
           )}
           {brief.openQuestions.length > 0 && (
             <div>
-              <div className="eyebrow mb-2">still open</div>
+              <div className="eyebrow mb-2">{u ? "unclear in code" : "still open"}</div>
               <ul className="space-y-1 text-[13px] text-ink-2">
                 {brief.openQuestions.map((q) => (
                   <li key={q} className="flex gap-2">

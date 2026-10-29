@@ -191,16 +191,26 @@ export function previewOps(r: Replayed, ops: SchemaOp[], meta: MigrationMeta, fi
 
 // ---------- bound to the user's settings ----------
 
-export function settingsCfg(): ReplayCfg {
+export function settingsCfg(repo = getSettings().repoPath): ReplayCfg {
   const s = getSettings();
   return {
-    repo: s.repoPath,
+    repo,
     dirs: [s.migrationsDir, ...(s.extraMigrationDirs ?? [])].filter(Boolean),
     baseline: s.baselineSchemaPath ?? "",
     cacheFile: path.join(DATA_DIR, "cache", "schema", "effects-v1.json"),
   };
 }
-export const current = () => replay(settingsCfg());
+// the schema as it is on the base branch (settings.baseBranch, fetched): lambda's shared checkout, not the
+// developer's working tree (an old local branch would hide newer migrations). no checkout yet / no repo →
+// the working tree. "pick from repo" proposals still read the working tree's uncommitted files (git.ts).
+async function schemaRepo(): Promise<string> {
+  const { repoPath } = getSettings();
+  if (!repoPath) return repoPath;
+  const { prepareSharedWorktree } = await import("../intake"); // lazy: intake → jobs → schema
+  const wt = await prepareSharedWorktree(repoPath, { fetch: true, move: true }).catch(() => null);
+  return wt?.dir ?? repoPath;
+}
+export const current = async () => replay(settingsCfg(await schemaRepo()));
 export const getHead = async () => headOf(await current());
 export const getModelAt = async (i: number) => modelAt(await current(), i);
 export const getMigrationView = async (id: string, sql = false) => migrationView(await current(), id, sql);

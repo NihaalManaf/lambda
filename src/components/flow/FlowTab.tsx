@@ -16,6 +16,7 @@ import { notify } from "@/lib/desktop";
 import FlowChart, { type ChartOp } from "./FlowChart";
 import { applyGraphOp, isGraphOp } from "@/lib/flow-graph";
 import { Icon, LensGlyph } from "./glyphs";
+import { useEdgeCases, withoutEdgeCases } from "./edgeCases";
 
 // Flows tab: one lens at a time (segmented control), tiny editable charts, a decision per edge case.
 
@@ -291,7 +292,8 @@ export default function FlowTab({
 
   // the pill moves now; the (heavier) canvases follow in a deferred render so the switch never drops a frame
   const shown = useDeferredValue(lens);
-  const sets = feature.flowcharts.filter((s) => s.lens === shown).reverse();
+  const edgeCases = useEdgeCases();
+  const sets = (edgeCases ? feature.flowcharts : withoutEdgeCases(feature.flowcharts)).filter((s) => s.lens === shown).reverse();
   const meta = LENSES.find((l) => l.v === shown)!;
 
   return (

@@ -5,4 +5,5 @@ export interface AcceptanceDraft {
   then: string;
   startPath: string;
   steps: string[];
+  unverified?: string | null; // check stage only: a reason marks it, null / "" clears it
 }

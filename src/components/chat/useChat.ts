@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ChatEvent, ChatTurn } from "@/lib/chat";
+import type { ChatEvent, ChatTurn, ChatView } from "@/lib/chat";
 import type { ChangeNote } from "@/lib/ops";
 import type { FeatureView } from "@/lib/types";
 
@@ -21,7 +21,8 @@ const pq = (p?: string) => (p ? `?piece=${encodeURIComponent(p)}` : "");
 export const threadOf = (f: FeatureView): ChatTurn[] => f.chat ?? [];
 
 // pieceId = the piece selected in the workspace (default: the view's piece)
-export function useChat(feature: FeatureView, onChange: (f: FeatureView) => void, pieceId?: string) {
+// view = what the developer is looking at outside the workspace (e.g. a schema table), sent with each message
+export function useChat(feature: FeatureView, onChange: (f: FeatureView) => void, pieceId?: string, view?: ChatView) {
   const [pending, setPending] = useState<Pending | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const fid = feature.id;
@@ -31,6 +32,8 @@ export function useChat(feature: FeatureView, onChange: (f: FeatureView) => void
   const changeRef = useRef(onChange);
   const pieceRef = useRef(pieceId ?? feature.pieceId);
   pieceRef.current = pieceId ?? feature.pieceId;
+  const viewRef = useRef(view);
+  viewRef.current = view;
   useEffect(() => {
     changeRef.current = onChange;
   });
@@ -58,7 +61,7 @@ export function useChat(feature: FeatureView, onChange: (f: FeatureView) => void
         const res = await fetch(`/api/features/${fid}/chat`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ text, pieceId: pieceRef.current || undefined }),
+          body: JSON.stringify({ text, pieceId: pieceRef.current || undefined, view: viewRef.current }),
           signal: ac.signal,
         });
         if (!res.ok || !res.body) {

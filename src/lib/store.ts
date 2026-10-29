@@ -4,7 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { nanoid } from "nanoid";
 import { migrateFeature } from "./pieces";
-import type { Feature, Settings } from "./types";
+import type { Feature, FeatureMode, Settings } from "./types";
 
 // Local-first JSON store. Single user; writes are serialised in process and across processes (lockfile).
 
@@ -45,6 +45,8 @@ export function defaultSettings(): Settings {
     envPath: "", // empty: keys come from lambda's own .env.local / process env
     frontendUrl: "http://localhost:3000",
     repoPath: "", // set in /settings: the app repo lambda reads + tests
+    baseBranch: "", // "" = auto-detect main / master (defaultBranch())
+    edgeCases: true,
     model: "claude-opus-5-5",
     accounts: [],
     appHosts: [],
@@ -79,12 +81,13 @@ export function getFeature(featureId: string): Feature | undefined {
 }
 
 // New features start in the intake conversation: no pieces, no generation until the brief settles.
-export function createFeature(title: string, brief: string, phase: Feature["phase"] = "intake"): Promise<Feature> {
+export function createFeature(title: string, brief: string, phase: Feature["phase"] = "intake", mode: FeatureMode = "build"): Promise<Feature> {
   const f: Feature = {
     id: id("ft"),
     title,
     brief,
     phase,
+    ...(mode === "understand" ? { mode } : {}), // build stays absent, like pre-mode data
     status: "shaping",
     createdAt: now(),
     updatedAt: now(),

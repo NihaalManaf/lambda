@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import type { FeatureView } from "@/lib/types";
+import { featureMode, type FeatureView } from "@/lib/types";
 import BriefCard from "./BriefCard";
 
 // Feature-level: the settled intake brief + the conversation that produced it (collapsed).
@@ -14,7 +14,7 @@ export default function BriefTab({ feature }: { feature: FeatureView; onChange?:
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       {doc ? (
-        <BriefCard brief={doc} />
+        <BriefCard brief={doc} mode={featureMode(feature)} />
       ) : (
         <div className="card p-6 md:p-8">
           <div className="eyebrow mb-3">brief</div>

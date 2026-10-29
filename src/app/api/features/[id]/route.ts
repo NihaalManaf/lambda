@@ -1,10 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { pieceIdFrom, pieceView } from "@/lib/pieces";
 import { deleteFeature, getFeature, SHOTS_DIR, updateFeature } from "@/lib/store";
 import { cancelFeatureRuns } from "@/lib/verify";
-import { stopAllIntake } from "@/lib/intake";
+import { removeFeatureWorktree, stopAllIntake } from "@/lib/intake";
+import { removeAgentState } from "@/lib/agentstate";
 import type { Feature } from "@/lib/types";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -28,13 +29,17 @@ export async function PATCH(req: Request, { params }: Ctx) {
   return NextResponse.json(pieceView(f, pieceIdFrom(req.url)));
 }
 
-// Also drops the feature's screenshots + run dirs (all ids are store-generated, no user paths).
+// Also drops the feature's screenshots + run dirs (all ids are store-generated, no user paths), and — after
+// the response, once its sessions have stopped — its own checkout (build mode).
 export async function DELETE(_: Request, { params }: Ctx) {
   const { id } = await params;
   const f = getFeature(id);
   cancelFeatureRuns(id); // stop agents before their dirs go
   stopAllIntake(id); // its intake turn / codebase question would otherwise run on for a feature that's gone
   await deleteFeature(id);
+  const stored = f?.intake?.featureDir ?? f?.intake?.worktree;
+  after(() => removeFeatureWorktree(id, stored));
+  removeAgentState(id);
   const files = [
     ...(f?.pieces ?? []).flatMap((p) => p.mockups.flatMap((m) => [m.shot, m.thumb])),
     ...(f?.pieces ?? []).flatMap((p) => p.runs.map((r) => r.id)),

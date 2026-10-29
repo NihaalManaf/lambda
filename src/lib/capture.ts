@@ -19,6 +19,7 @@ export interface Capture {
   title: string;
   width: number;
   height: number;
+  fold: number; // viewport height
   elements: DomBox[];
 }
 
@@ -101,7 +102,15 @@ function collectBoxes(args: { maxHeight: number; max: number }) {
   ];
   const sy = window.scrollY;
   const vw = document.documentElement.clientWidth;
-  type Raw = { x: number; y: number; w: number; h: number; tag: string; text: string; role?: string; tier: number };
+  const vh = window.innerHeight;
+  type Raw = { x: number; y: number; w: number; h: number; tag: string; text: string; role?: string; floating?: boolean; tier: number };
+  // a small fixed widget outside nav/header/aside chrome (fab, chat bubble, toast) floats over whatever is under it
+  const floats = (el: Element, r: DOMRect) => {
+    if (r.width * r.height > vw * vh * 0.12 || el.closest("nav,header,aside")) return false;
+    for (let n: Element | null = el; n && n !== document.body; n = n.parentElement)
+      if (getComputedStyle(n).position === "fixed") return true;
+    return false;
+  };
   const out: Raw[] = [];
   const seen = new Set<Element>();
   SEL.forEach((sel, tier) => {
@@ -134,6 +143,7 @@ function collectBoxes(args: { maxHeight: number; max: number }) {
         tag: el.tagName.toLowerCase(),
         text: text.length > 60 ? text.slice(0, 57) + "…" : text,
         role: el.getAttribute("role") || undefined,
+        floating: floats(el, r) || undefined,
         tier,
       });
     });
@@ -153,7 +163,7 @@ function dedupe(raw: (Omit<DomBox, "idx"> & { tier: number })[]) {
   }
   return kept
     .sort((a, b) => a.y - b.y || a.x - b.x)
-    .map((b, idx): DomBox => ({ idx, x: b.x, y: b.y, w: b.w, h: b.h, tag: b.tag, text: b.text, role: b.role || undefined }));
+    .map((b, idx): DomBox => ({ idx, x: b.x, y: b.y, w: b.w, h: b.h, tag: b.tag, text: b.text, role: b.role || undefined, ...(b.floating ? { floating: true } : {}) }));
 }
 
 // ---------- capture ----------
@@ -223,7 +233,8 @@ async function captureNow(opts: Parameters<typeof captureUrl>[0]): Promise<Captu
   try {
     aborted();
     const stored = acc && fs.existsSync(authFile(acc.id)) ? authFile(acc.id) : undefined;
-    const ctx = await browser.newContext({ viewport, deviceScaleFactor: 1, storageState: stored });
+    const touch = viewport.width < 600; // phone-sized: honour the page's mobile meta viewport + touch styles
+    const ctx = await browser.newContext({ viewport, deviceScaleFactor: 1, isMobile: touch, hasTouch: touch, storageState: stored });
     await ctx.addInitScript("window.__name = window.__name || ((f) => f)"); // esbuild keepNames shim for evaluate()
     if (acc && !stored) await login(ctx, acc, base).catch((e) => Promise.reject(asLogin(e)));
 
@@ -274,6 +285,7 @@ async function captureNow(opts: Parameters<typeof captureUrl>[0]): Promise<Captu
       title: (await page.title()).slice(0, 80) || new URL(page.url()).pathname,
       width: viewport.width,
       height,
+      fold: viewport.height,
       elements: dedupe(raw).map((e) => ({ ...e, text: maskText(e.text) })),
     };
   } catch (e) {

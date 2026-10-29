@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getFeature } from "@/lib/store";
+import { getFeature, getSettings } from "@/lib/store";
 import Workspace from "@/components/Workspace";
 
 export const dynamic = "force-dynamic";
@@ -8,5 +8,5 @@ export default async function FeaturePage({ params }: { params: Promise<{ id: st
   const { id } = await params;
   const feature = getFeature(id);
   if (!feature) notFound();
-  return <Workspace initial={feature} />;
+  return <Workspace initial={feature} edgeCases={getSettings().edgeCases !== false} />;
 }

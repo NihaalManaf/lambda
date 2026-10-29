@@ -4,7 +4,9 @@ import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import clsx from "clsx";
 import type { FlowEdge, FlowNode, FlowNodeKind } from "@/lib/types";
+import FlagButton from "@/components/issues/FlagButton";
 import { Icon, KindGlyph } from "./glyphs";
+import { useEdgeCases } from "./edgeCases";
 
 // Contents of the node + edge popovers. Labels stay tiny; icons carry meaning, titles explain on hover.
 
@@ -41,6 +43,7 @@ export function NodeEditor({
 }) {
   const [label, setLabel] = useState(node.label);
   const [mode, setMode] = useState<Mode>("idle");
+  const edgeCases = useEdgeCases();
   const [a, setA] = useState("");
   const [b, setB] = useState("");
 
@@ -104,11 +107,11 @@ export function NodeEditor({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, transition: { duration: 0.08 } }}
             transition={{ duration: 0.16, ease }}
-            className="grid grid-cols-[1fr_1fr_1fr_auto] gap-1"
+            className={clsx("grid gap-1", edgeCases ? "grid-cols-[1fr_1fr_1fr_auto]" : "grid-cols-[1fr_1fr_auto]")}
           >
             <Action icon={<Icon.plus />} label="step" title="add a step after this" onClick={() => open("step")} />
             <Action icon={<Icon.branch />} label="branch" title="add a labeled branch" onClick={() => open("branch")} />
-            <Action icon={<Icon.pin />} label="edge case" title="pin an edge case here" onClick={() => open("case")} />
+            {edgeCases && <Action icon={<Icon.pin />} label="edge case" title="pin an edge case here" onClick={() => open("case")} />}
             <button
               onClick={onDelete}
               title="delete node · reconnects around it"
@@ -165,6 +168,9 @@ export function NodeEditor({
           </motion.form>
         )}
       </AnimatePresence>
+      <div className="flex justify-end">
+        <FlagButton refTo={{ tab: "flows", id: node.id, label: node.label.slice(0, 60) }} title={`flow step: ${node.label}`.slice(0, 120)} />
+      </div>
     </div>
   );
 }

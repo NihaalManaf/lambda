@@ -1,11 +1,12 @@
 import dagre from "@dagrejs/dagre";
+import { nodeDescription } from "./descriptions";
 import type { Edge, Node } from "@xyflow/react";
 import type { FlowNode, Flowchart } from "@/lib/types";
 
 // Top-down dagre layout. Sizes are estimated from label length so nodes never reflow.
 
 export type Pin = { id: string; n: number; handled: boolean | null };
-export type FlowNodeData = { label: string; kind: FlowNode["kind"]; pins: Pin[]; fresh?: boolean };
+export type FlowNodeData = { label: string; description?: string; kind: FlowNode["kind"]; pins: Pin[]; fresh?: boolean };
 
 export function nodeSize(n: FlowNode) {
   const w = Math.round(Math.min(190, Math.max(104, n.label.length * 7 + 40)));
@@ -45,7 +46,7 @@ export function layoutChart(c: Flowchart) {
       position: { x: p.x - w / 2, y: p.y - h / 2 },
       width: w,
       height: h,
-      data: { label: n.label, kind: n.kind, pins: pins.get(n.id) ?? [] },
+      data: { label: n.label, description: nodeDescription(n, c), kind: n.kind, pins: pins.get(n.id) ?? [] },
     };
   });
 
