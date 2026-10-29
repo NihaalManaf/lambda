@@ -1,0 +1,73 @@
+src/components/Globe.tsx
+  s_74b7625d8de655::t_da51b20336b3d3 1-4,6-9,12-13,15,18-19,21-32,34
+  s_74b7625d8de655::t_bb122206f31218 5,10-11,14,16-17,20,33,35-36
+src/components/home/FeatureCard.tsx
+  s_74b7625d8de655::t_299a6a97a64f26 68
+  s_74b7625d8de655::t_dd9b1b1f0d1e84 9,20,58-67,69-72
+scripts/art/spin.py
+  s_74b7625d8de655::t_72d54efac1a0da 1-4,6-13,15-44,47-76,79-106
+  s_74b7625d8de655::t_3550d0c0760aa0 5,14,45-46,77-78
+src/components/home/FeatureGrid.tsx
+  s_74b7625d8de655::t_533f28749d7ce2 3,5,9-11,13-27,29,31,34
+scripts/art/comp.cjs
+  s_74b7625d8de655::t_87c75965fc5ca1 1-28
+src/app/api/features/route.ts
+  s_74b7625d8de655::t_ac49e30ddf03ce 2,11
+  s_74b7625d8de655::t_d223100c27f343 15
+src/components/Evolution.tsx
+  s_74b7625d8de655::t_479b59ccdef0f0 16-17,31-32,35-41,52
+  s_74b7625d8de655::t_ef2230c108819d 1-15,18-30,33-34,42-51,53-57
+src/app/features/page.tsx
+  s_74b7625d8de655::t_ac49e30ddf03ce 1,11
+scripts/art/gen.py
+  s_74b7625d8de655::t_87c75965fc5ca1 1-3,5-14,16-32
+  s_74b7625d8de655::t_bc4e3856aae376 4,15
+style.md
+  s_74b7625d8de655::t_fe21b2c9811b76 59-68,70-82,85-87
+  s_74b7625d8de655::t_9e0e824a3d5d06 69,83-84
+src/lib/busy.ts
+  s_74b7625d8de655::t_b2a9d3f4fc82ce 1-14,16-20
+  s_0432edcfef3b37::t_946e45b6ad4eb8 15
+src/components/askbar/AskBar.tsx
+  s_74b7625d8de655::t_479b59ccdef0f0 242-245
+  s_dd67ca059f096f::t_a3426b4057f7e5 309,313,315,317-319
+  s_74b7625d8de655::t_6227f5a956ce9f 12
+  s_dd67ca059f096f::t_f193bb5c81fdc1 241,314,316
+  s_74b7625d8de655::t_b4a53c942b9153 246-247
+  s_dd67ca059f096f::t_62b63214394983 320-322
+  s_dd67ca059f096f::t_b91a57d45bcb66 323
+scripts/art/split.py
+  s_74b7625d8de655::t_9e0e824a3d5d06 1-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "af3866b3d5a660cf2792cd85e036e43f7ee57e64",
+  "prompts": {},
+  "sessions": {
+    "s_0432edcfef3b37": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1e0a5cea-9b61-45c1-823c-0c36d89b69fb",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Nihaal Manaf <nihaalmanaf@gmail.com>"
+    },
+    "s_74b7625d8de655": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "31c5fb27-e3cc-44bd-9809-9322936c1e00",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Nihaal Manaf <nihaalmanaf@gmail.com>"
+    },
+    "s_dd67ca059f096f": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a188c6-2eac-7747-8577-189956cf4bf2",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Nihaal Manaf <nihaalmanaf@gmail.com>"
+    }
+  }
+}
