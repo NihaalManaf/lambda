@@ -12,6 +12,7 @@ import KindIcon from "./KindIcon";
 import { KINDS, kindMeta } from "./marks";
 import { DEFAULT_VIEWPORT, foldOf, viewportOf, VIEWPORTS } from "@/lib/viewports";
 import SketchCanvas from "./SketchCanvas";
+import { useStack } from "@/components/stack/api";
 
 // UI sketch: marker over a real screenshot of the running frontend. Scope, not a render.
 
@@ -38,6 +39,15 @@ const COPY: Record<FeatureMode, { again: string; start: string; ask: string; run
 const KINDS_FOR: Record<FeatureMode, typeof KINDS> = { build: KINDS, understand: KINDS.filter((k) => k.kind === "note") };
 // event-time stamp for the local job timer (handlers only)
 const stamp = () => Date.now();
+// "http://localhost:3000/plans?x" with base "http://localhost:3000" → "/plans?x"; other origins → null
+const sameOrigin = (target: string, base: string) => {
+  try {
+    const t = new URL(target), b = new URL(base);
+    return t.origin === b.origin ? `${t.pathname}${t.search}${t.hash}` || "/" : null;
+  } catch {
+    return null;
+  }
+};
 
 export default function MockupTab({ feature, onChange }: { feature: FeatureView; onChange: (f: FeatureView) => void }) {
   // auto sketches (the background job) first, then manual captures, each newest first as stored
@@ -48,6 +58,11 @@ export default function MockupTab({ feature, onChange }: { feature: FeatureView;
   const copy = COPY[fmode];
   const kinds = KINDS_FOR[fmode];
   const autoBusy = autoJob?.status === "queued" || autoJob?.status === "running";
+  // lambda's own copy of the app, when its local stack is up: the one auto-sketch and bare paths already use,
+  // so the page field, the down card and manual captures point at it too (not the settings url)
+  const { view: stack } = useStack(feature.id);
+  const front = stack?.services.find((s) => s.role === "frontend");
+  const appUrl = front?.status === "ready" ? front.url : undefined;
   const down = appDown(autoJob);
   const rootRef = useRef<HTMLDivElement>(null);
   const [settings, setSettings] = useState<SettingsLite | null>(null);
@@ -129,6 +144,9 @@ export default function MockupTab({ feature, onChange }: { feature: FeatureView;
   const capture = async (c: CaptureInput) => {
     setError(null);
     await flush();
+    // the settings origin typed out while lambda's app is up → send the path, so it lands on lambda's app
+    const own = appUrl && settings?.frontendUrl ? sameOrigin(c.target, settings.frontendUrl) : null;
+    if (own) c = { ...c, target: own };
     const isUrl = /^https?:\/\//i.test(c.target);
     setJob({ kind: "capture", label: c.target.replace(/^https?:\/\//, ""), withSketch: Boolean(c.intent), t0: Date.now() });
     setSec(0);
@@ -214,15 +232,28 @@ export default function MockupTab({ feature, onChange }: { feature: FeatureView;
       setStarting(false);
     }
   };
+  // the auto sketch gave up because the app was down; lambda's app has come up since → try once more on its own
+  const retried = useRef(false);
+  const downNow = appDown(autoJob);
+  useEffect(() => {
+    if (!downNow) retried.current = false;
+    else if (appUrl && !retried.current) {
+      retried.current = true;
+      void retryAuto();
+    }
+    // retryAuto is recreated each render; the guard keeps this to one try per outage
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [downNow, appUrl]);
+
 
   return (
     <div ref={rootRef} className="flex flex-col gap-6">
-      <CaptureBar settings={settings} busy={Boolean(job)} onCapture={capture} understand={understand} />
+      <CaptureBar settings={settings} appUrl={appUrl} busy={Boolean(job)} onCapture={capture} understand={understand} />
 
       <AnimatePresence initial={false}>
         {down && !autoBusy && (
           <motion.div key="down" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={spring}>
-            <AppDownCard url={settings?.frontendUrl ?? autoJob?.error?.replace(/^app not running at /, "") ?? ""} reason={autoJob?.error} onRetry={retryAuto} />
+            <AppDownCard url={appUrl ?? autoJob?.error?.replace(/^app not running at /, "") ?? settings?.frontendUrl ?? ""} reason={autoJob?.error} onRetry={retryAuto} />
           </motion.div>
         )}
         {autoJob?.status === "error" && !down && !autoBusy && (

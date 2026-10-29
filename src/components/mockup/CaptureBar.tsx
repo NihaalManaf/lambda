@@ -42,12 +42,14 @@ const writeVp = (v: ViewportId) => {
 };
 
 // understand: the marker explains what's there instead of marking changes
-export default function CaptureBar(p: { settings: SettingsLite | null; busy: boolean; onCapture: (c: CaptureInput) => void; understand?: boolean }) {
+// appUrl: lambda's own running app (local stack). Then the field defaults to "/" — a bare path lands on it.
+export default function CaptureBar(p: { settings: SettingsLite | null; appUrl?: string; busy: boolean; onCapture: (c: CaptureInput) => void; understand?: boolean }) {
   const [target, setTarget] = useState<string | null>(null); // null = follow settings default
   const [accountId, setAccountId] = useState("");
   const [intent, setIntent] = useState("");
-  const value = target ?? p.settings?.frontendUrl ?? "";
   const viewport = useSyncExternalStore(subscribe, readVp, () => DEFAULT_VIEWPORT);
+  const value = target ?? (p.appUrl ? "/" : (p.settings?.frontendUrl ?? ""));
+  const onStack = Boolean(p.appUrl) && !/^https?:\/\//i.test(value.trim());
   const accounts = p.settings?.accounts ?? [];
 
   const submit = () => {
@@ -73,6 +75,11 @@ export default function CaptureBar(p: { settings: SettingsLite | null; busy: boo
             onChange={(e) => setTarget(e.target.value)}
             spellCheck={false}
           />
+          {onStack && (
+            <span className="shrink-0 whitespace-nowrap font-mono text-[11px] text-grey" title="lambda's own copy of the app (local stack)">
+              on {p.appUrl!.replace(/^https?:\/\//, "")}
+            </span>
+          )}
         </label>
         <div className="flex shrink-0 rounded-full border border-line-2 bg-card p-0.5" role="radiogroup" aria-label="capture size">
           {VIEWPORTS.map((v) => (
