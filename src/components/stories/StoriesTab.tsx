@@ -27,10 +27,12 @@ type Col = {
 };
 type Pt = { x: number; y: number };
 
-// Column under a page-coord point (the dragged tile sits on top, so scan the whole stack).
+// Column under a page-coord point. Tiles are skipped: the dragged tile sits on top of the stack but still lives
+// in its source column, so reading its column would always answer "where it came from".
 function colAt(p: Pt): string | null {
   const els = document.elementsFromPoint(p.x - window.scrollX, p.y - window.scrollY);
   for (const el of els) {
+    if ((el as HTMLElement).closest?.("[data-story]")) continue;
     const c = (el as HTMLElement).closest?.("[data-col]");
     if (c) return c.getAttribute("data-col");
   }
