@@ -12,6 +12,9 @@ const kalam = Kalam({ subsets: ["latin"], weight: ["400", "700"], variable: "--f
 export const metadata: Metadata = {
   title: "lambda",
   description: "design, review and verify — before the agents build",
+  // cross-origin requests carry no referer: local urls stay local, and X's video CDN refuses
+  // IP-literal referers like 127.0.0.1 (the voices clips). same-origin requests are unaffected.
+  referrer: "same-origin",
 };
 
 // runs before first paint: electron's user agent carries "lambda-desktop" → html.desktop (title-bar css).
