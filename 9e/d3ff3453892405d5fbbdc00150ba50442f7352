@@ -1,0 +1,19 @@
+src/components/intake/IntakeView.tsx
+  s_74b7625d8de655::t_8c4666730e8c4b 136-139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9ed3ff3453892405d5fbbdc00150ba50442f7352",
+  "prompts": {},
+  "sessions": {
+    "s_74b7625d8de655": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "31c5fb27-e3cc-44bd-9809-9322936c1e00",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Nihaal Manaf <nihaalmanaf@gmail.com>"
+    }
+  }
+}
