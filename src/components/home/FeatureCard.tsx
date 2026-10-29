@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "motion/react";
 import clsx from "clsx";
 import { featureMode, type Feature, type FeatureStatus } from "@/lib/types";
 import { allRuns, allStories } from "@/lib/pieces";
+import Globe from "@/components/Globe";
 import { ago } from "./time";
 
 const STATUS: Record<FeatureStatus, string> = {
@@ -16,7 +17,7 @@ const STATUS: Record<FeatureStatus, string> = {
   done: "bg-card border-ok/40 text-ok",
 };
 
-export function FeatureCard({ f, onDelete }: { f: Feature; onDelete: () => void }) {
+export function FeatureCard({ f, onDelete }: { f: Feature & { busy?: string | null }; onDelete: () => void }) {
   const [arm, setArm] = useState(false);
   // disarm delete if the pointer wanders off
   useEffect(() => {
@@ -54,6 +55,21 @@ export function FeatureCard({ f, onDelete }: { f: Feature; onDelete: () => void 
               {openIssues} issue{openIssues > 1 ? "s" : ""}
             </span>
           )}
+          <AnimatePresence>
+            {f.busy && (
+              <motion.span
+                key="busy"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                transition={{ type: "spring", stiffness: 420, damping: 34 }}
+                className="flex min-w-0 items-center gap-1.5"
+              >
+                <Globe height={44} label={f.busy} className="-my-2.5 shrink-0" />
+                <span className="truncate font-mono text-[11px] text-grey">{f.busy}</span>
+              </motion.span>
+            )}
+          </AnimatePresence>
         </div>
         <button
           type="button"

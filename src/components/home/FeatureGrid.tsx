@@ -1,18 +1,37 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import type { Feature } from "@/lib/types";
+import type { Listed } from "@/lib/busy";
 import { FeatureCard } from "./FeatureCard";
 import { EmptyState } from "./EmptyState";
 
-export function FeatureGrid({ initial }: { initial: Feature[] }) {
-  const [items, setItems] = useState(initial);
+const POLL_MS = 4000;
 
-  async function remove(f: Feature) {
+export function FeatureGrid({ initial }: { initial: Listed[] }) {
+  const [items, setItems] = useState(initial);
+  const deleting = useRef(new Set<string>());
+
+  // agents finish and start while you look at the list: re-read it while the tab is visible
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      if (document.visibilityState === "visible") {
+        const fresh = (await fetch("/api/features").then((r) => (r.ok ? r.json() : null)).catch(() => null)) as Listed[] | null;
+        if (fresh) setItems(fresh.filter((f) => !deleting.current.has(f.id)));
+      }
+      t = setTimeout(tick, POLL_MS);
+    };
+    t = setTimeout(tick, POLL_MS);
+    return () => clearTimeout(t);
+  }, []);
+
+  async function remove(f: Listed) {
     const idx = items.indexOf(f);
+    deleting.current.add(f.id);
     setItems((xs) => xs.filter((x) => x.id !== f.id)); // optimistic
     const res = await fetch(`/api/features/${f.id}`, { method: "DELETE" }).catch(() => null);
+    deleting.current.delete(f.id);
     if (!res?.ok)
       setItems((xs) => {
         const next = [...xs];

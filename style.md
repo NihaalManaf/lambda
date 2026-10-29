@@ -56,6 +56,35 @@ Classical marble / stone sculpture, photoreal, transparent cutout, floating on p
 - files: `public/art/*.webp`, ~900px wide, transparent. pillar: `pillar-laurel.webp` (ivory ionic column, marble laurel + ivy), flanks the manifesto, right copy mirrored.
 - in layout, statues float (zero-height cells) and never push content.
 
+## Loaders
+
+Working states are statues at work, not spinners. Each loader is a few baked frames of one generated scene, hard-cut like stop-motion, so it reads as the art come alive.
+
+| loader | scene | shown when | file |
+|---|---|---|---|
+| sculptor | graphite sculptor chiselling an ivory block | building structure (schema, queues, sources) | `Sculptor.tsx`, `public/art/sculptor/` |
+| painter | painter at a marble easel | drawing (flows, mockups) | `Painter.tsx`, `public/art/painter/` |
+| scribe | scribe writing on a marble scroll | writing (stories, the brief) | `Scribe.tsx`, `public/art/scribe/` |
+| globe | ivory globe turning on an ionic pedestal | compact "an agent is working" (feature cards, pills) | `Globe.tsx`, `public/art/globe/spin.webp` |
+| evolution | march of progress frieze, ape → man with a laptop, graphite → ivory | lambda working in the ask bar | `Evolution.tsx`, `public/art/march/` |
+
+Making a new one (scripts in `scripts/art/`, key in `OPENAI_API_KEY`):
+
+1. **base frame** — `gen.py` with `gpt-image-1.5` on `/v1/images/edits`, an existing art file (e.g. `public/art/sculptor/raised.webp` flattened on white) as the reference, `input_fidelity: low`, transparent background, 1536×1024. Generate 2 and pick. Prompt = the style lock + the scene:
+   > Match the rendering style, lighting, scale and stone materials of the attached reference exactly (photoreal 3D render of classical sculpture: graphite-grey stone figure, rough ivory marble, soft diffused studio light from upper left, no hard shadows). Fully transparent background, no floor, no ground plane, no shadow plate, no text, no frame, no colour anywhere: only greys and ivory. Whole scene visible, nothing cropped, generous empty margin all around.
+
+   then the scene: figure in side profile FACING RIGHT, the tool and what it's working on, and the pose of this frame in CAPS (e.g. "The mallet is RAISED high behind his head").
+2. **pose frames** — edit the chosen base with `input_fidelity: high`:
+   > Edit this exact image. Keep EVERYTHING identical and pixel-aligned: same [figure], same pose of body, head, legs and left arm, same [props]; nothing moves or resizes except his right forearm, hand and [tool]. Same framing, lighting and scale. ONLY change: …
+
+   Say where the tool tip lands relative to something fixed ("directly below the chin of the painted face"). Generate 2–3 per pose and pick.
+3. **composite** — `comp.cjs spec.json`: every frame is the base everywhere except feathered polygons around the moving limb (plus an auto mask wherever coverage changed), so props never drift between cuts. `keep` rects pin props the edit dropped. Chroma is capped (16–24) so edits can't tint anything brown. Output: one crop, 720px wide webp per frame.
+4. **wire it** — a `Scene` for `StopMotion.tsx` (frames, timings, a cue at the tool tip for the small css effect: chips, wash, ink). Tool-tip coords are measured in the 720px frames.
+
+Friezes (evolution): one still of separate figures with a clear gap between each, then `split.py still.png out_dir` cuts one webp per figure on a shared ground line and prints their [left, width]; light them in a staggered css wave. The safety filter misreads unclothed statues as nudity — cover every figure ("carved stone fur", "animal-hide wrap", "draped chiton", "a museum display suitable for all ages").
+
+Things that turn instead of pose (the globe): generate the still (object on a pedestal, sphere seen straight on, nothing in front of it) and a flat texture in the same material (`opaque: true`, "flat equirectangular … carved in marble, evenly lit, no shading"), then `spin.py still.png texture.png out.webp 24 240 2.4` projects the texture onto the still's sphere, shades it with the still's own light, and writes one strip of frames. Play it with css `steps(n)`. Contrast ~2.4, or the carving vanishes below 60px.
+
 ## Motion
 
 Motion library: `motion/react`. Butter, never bounce for its own sake.

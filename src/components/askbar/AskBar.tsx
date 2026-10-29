@@ -9,6 +9,7 @@ import type { ChangeNote } from "@/lib/ops";
 import { featureMode, type FeatureView } from "@/lib/types";
 import { focusRef, useChat } from "@/components/chat/useChat";
 import Thread, { type Suggestion } from "./Thread";
+import Evolution from "@/components/Evolution";
 
 // ask lambda: a pill pinned bottom-center that grows upward into a thread attached to it (one surface,
 // layout-animated), and folds back down. Same feature.chat as the intake: the conversation just continues.
@@ -237,10 +238,13 @@ export default function AskBar({ feature, pieceId, onChange, onFocus, view }: As
               style={{ height: PILL_H }}
             >
               <span className="display text-lg leading-none text-ink">λ</span>
-              <span className={clsx("min-w-0 flex-1 truncate text-[14px]", busy ? "text-grey" : "text-grey group-hover:text-ink-2")}>
-                {busy ? (pending?.status ?? "lambda is working…") : draft.trim() ? draft : "ask lambda…"}
-              </span>
-              {busy && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-lilac" aria-label="working" />}
+              {busy ? (
+                <span className="flex min-w-0 flex-1 items-center justify-center">
+                  <Evolution height={26} label={pending?.status ?? "lambda is working"} />
+                </span>
+              ) : (
+                <span className="min-w-0 flex-1 truncate text-[14px] text-grey group-hover:text-ink-2">{draft.trim() ? draft : "ask lambda…"}</span>
+              )}
               <kbd className="hidden rounded-full border border-line bg-card px-2 py-0.5 font-mono text-[11px] text-grey sm:inline">⌘K</kbd>
             </button>
           )}
@@ -302,10 +306,21 @@ function Composer({
               onSubmit();
             }
           }}
-          placeholder={busy ? "lambda is working…" : idle}
+          placeholder={busy ? "" : idle}
           aria-label="message lambda"
           className="max-h-40 min-h-[24px] flex-1 resize-none bg-transparent py-1.5 text-[14px] leading-snug text-ink outline-none placeholder:text-grey"
         />
+        {busy && !value && (
+          <div
+            role="status"
+            className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden text-[14px] leading-snug text-grey"
+          >
+            <span className="sr-only">lambda is working…</span>
+            <span aria-hidden="true" className="flex shrink-0 items-center">
+              <Evolution height={26} />
+            </span>
+          </div>
+        )}
         {busy ? (
           <button
             type="button"

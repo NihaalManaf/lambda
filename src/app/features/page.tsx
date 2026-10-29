@@ -1,3 +1,4 @@
+import { withBusy } from "@/lib/busy";
 import { listFeatures } from "@/lib/store";
 import { FeatureGrid } from "@/components/home/FeatureGrid";
 
@@ -7,7 +8,7 @@ export const metadata = { title: "features · lambda" };
 export default function FeaturesPage() {
   return (
     <main>
-      <FeatureGrid initial={listFeatures()} />
+      <FeatureGrid initial={withBusy(listFeatures())} />
     </main>
   );
 }
