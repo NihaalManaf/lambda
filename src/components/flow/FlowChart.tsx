@@ -295,14 +295,13 @@ function Chart({
             )}
           </AnimatePresence>
 
-          <div className="flex flex-col md:flex-row">
+          {/* --ch: the chart's height; the edge-case rail never grows past it, it scrolls instead */}
+          <div className="flex flex-col md:flex-row" style={{ ["--ch" as string]: `${box.h}px` }}>
             <div
               ref={wrap}
-              className={clsx(
-                "relative w-full min-w-0 flex-none bg-paper",
-                chart.edgeCases.length ? "md:w-[min(var(--cw),calc(100%-18rem))]" : "md:flex-1",
-              )}
-              style={{ height: box.h, ["--cw" as string]: `${box.w}px` }}
+              // the chart is the point: it takes the row; edge cases get a capped rail beside it
+              className="relative w-full min-w-0 bg-paper md:flex-1"
+              style={{ height: box.h }}
             >
               <ReactFlow
                 nodes={nodes}
@@ -483,9 +482,19 @@ function EdgeCases({
   onToggle: (id: string, h: Handled) => void;
   onRemove: (id: string) => void;
 }) {
+  // hovering a badge on the chart brings its edge case into view in the rail
+  const rail = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!hover) return;
+    rail.current?.querySelector<HTMLElement>(`[data-ec="${CSS.escape(hover)}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [hover]);
+
   return (
-    <aside className="w-full min-w-0 border-t border-line md:min-w-72 md:flex-1 md:border-l md:border-t-0">
-      <div className="flex items-center gap-2 px-4 pb-1 pt-3">
+    <aside
+      ref={rail}
+      className="w-full min-w-0 border-t border-line md:max-h-[var(--ch)] md:w-[clamp(17rem,32%,24rem)] md:flex-none md:overflow-y-auto md:overscroll-contain md:border-l md:border-t-0"
+    >
+      <div className="sticky top-0 z-10 flex items-center gap-2 bg-card px-4 pb-1 pt-3">
         <span className="eyebrow">edge cases</span>
         {open > 0 && <span className="font-mono text-[11px] text-warn">{open} open</span>}
         {/* legend: what the three states mean, at a glance */}
@@ -508,6 +517,7 @@ function EdgeCases({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, transition: { duration: 0.1 } }}
               transition={{ type: "spring", duration: 0.3, bounce: 0 }}
+              data-ec={ec.id}
               onMouseEnter={() => setHover(ec.id)}
               onMouseLeave={() => setHover(null)}
               className={clsx(
