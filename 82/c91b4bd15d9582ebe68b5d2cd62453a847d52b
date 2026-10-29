@@ -1,0 +1,33 @@
+src/components/home/Voices.tsx
+  s_74b7625d8de655::t_4ad92a6af9db36 1-4,6,23,74-78,82-87,89-99,101-105,115,117,122-130,132-140,148-149,161,163-167
+  s_74b7625d8de655::t_45a5a16cd23282 141
+  s_74b7625d8de655::t_c7252536f0c025 5
+  s_74b7625d8de655::t_09641bb15eef44 15
+  s_74b7625d8de655::t_cbbbffca0bb23e 7-8,22,24-73,79-81,88,100,106-114,116,118-121,131,143-147,150-151,154-160,162
+  s_74b7625d8de655::t_ebe571e997899b 9-14,16-21,142,152-153
+src/components/home/voices-data.ts
+  s_74b7625d8de655::t_d46016f5cd1959 103
+  s_74b7625d8de655::t_116adcff36c3b6 1-102,104-121
+src/components/home/Home.tsx
+  s_74b7625d8de655::t_e67a68ccf54436 7,20
+  s_74b7625d8de655::t_861d41b4ab5f82 21-23
+  s_74b7625d8de655::t_dd6a047d9885fe 24-25
+src/app/layout.tsx
+  s_74b7625d8de655::t_1b5225f0ea4e09 15-17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "82c91b4bd15d9582ebe68b5d2cd62453a847d52b",
+  "prompts": {},
+  "sessions": {
+    "s_74b7625d8de655": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "31c5fb27-e3cc-44bd-9809-9322936c1e00",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Nihaal Manaf <nihaalmanaf@gmail.com>"
+    }
+  }
+}
