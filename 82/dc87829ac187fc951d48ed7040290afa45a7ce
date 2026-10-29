@@ -1,0 +1,46 @@
+src/components/askbar/AskBar.tsx
+  s_74b7625d8de655::t_51e7c68721c085 105,112,137-138,264
+  s_74b7625d8de655::t_3af9aff6de7e2a 13,104,106-111,113-131,135-136,139
+  s_74b7625d8de655::t_792f847830c123 169,303-308,321,323,343-351,356,366,379
+  s_74b7625d8de655::t_1b4dbe474e2154 263,312
+  s_74b7625d8de655::t_02bb2c29b75076 309-310
+src/components/askbar/Thread.tsx
+  s_74b7625d8de655::t_585e0913fd72bb 139,163,217,240,251
+  s_74b7625d8de655::t_c52e7ef9c5e667 11,216,218-237,252
+  s_74b7625d8de655::t_fda3f0e92bc5ff 238-239,370
+src/components/flow/nodes.tsx
+  s_0432edcfef3b37::t_1df546edea4a92 104,119-121
+src/components/cite/cite.ts
+  s_0432edcfef3b37::t_1df546edea4a92 76-80
+  s_74b7625d8de655::t_55949e4c26eef2 9,11-12,25,33,44,46,49-51
+  s_74b7625d8de655::t_cf869d8a886d10 55-56,60,75
+  s_74b7625d8de655::t_d42ae28ff85dbf 1-8,10,13-24,26-32,34-43,45,47-48,52-54,57-59,61-74,81-127
+src/lib/chat.ts
+  s_74b7625d8de655::t_a79b80a58ece40 545
+src/components/mockup/AnnotationList.tsx
+  s_74b7625d8de655::t_f24d116c6c977e 38-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "82dc87829ac187fc951d48ed7040290afa45a7ce",
+  "prompts": {},
+  "sessions": {
+    "s_0432edcfef3b37": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1e0a5cea-9b61-45c1-823c-0c36d89b69fb",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Nihaal Manaf <nihaalmanaf@gmail.com>"
+    },
+    "s_74b7625d8de655": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "31c5fb27-e3cc-44bd-9809-9322936c1e00",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Nihaal Manaf <nihaalmanaf@gmail.com>"
+    }
+  }
+}
